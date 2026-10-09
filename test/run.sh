@@ -4,36 +4,43 @@
 # changed CONFIG.SYS/AUTOEXEC.BAT and the target directory on COM1.
 #   test/run.sh            install
 #   UNINST=1 test/run.sh   install, then INSTALL /U from the target directory
+#   PKG=dir TARGET=NAME test/run.sh   install a distribution directory
+#                       (all files of dir, its INSTALL.INI) into A:\NAME
 # Environment: BOOTIMG (DOS boot floppy), INI, KEYS, TIMEOUT
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 OUT=$ROOT/build/test
-BOOTIMG=${BOOTIMG:-/home/mario/Iso/Dos/dos71de/Dos7.1_System_deutsch.IMG}
+BOOTIMG=${BOOTIMG:-$HOME/Iso/Dos/dos71de/Dos7.1_System_deutsch.IMG}
 INI=${INI:-$ROOT/test/TEST.INI}
 rm -rf "$OUT"; mkdir -p "$OUT/src"
 cp "$BOOTIMG" "$OUT/boot.img"; chmod u+w "$OUT/boot.img"
 crlf() { sed 's/$/\r/'; }
-cp "$ROOT/build/INSTALL.EXE" "$OUT/src/"
-cp "$INI" "$OUT/src/INSTALL.INI"
-cp "$ROOT/LICENSE" "$OUT/src/LICENSE.TXT"
-printf 'TESTDRV readme\nline 2\n' | crlf > "$OUT/src/README.TXT"
-cp "$ROOT/build/INSTALL.EXE" "$OUT/src/TESTDRV.SYS"
-printf '\xcd\x20' > "$OUT/src/TESTTOOL.COM"      # INT 20h
+TARGET=${TARGET:-TESTDRV}
+if [ -n "${PKG:-}" ]; then
+    cp "$PKG"/* "$OUT/src/"
+else
+    cp "$ROOT/build/INSTALL.EXE" "$OUT/src/"
+    cp "$INI" "$OUT/src/INSTALL.INI"
+    cp "$ROOT/LICENSE" "$OUT/src/LICENSE.TXT"
+    printf 'TESTDRV readme\nline 2\n' | crlf > "$OUT/src/README.TXT"
+    cp "$ROOT/build/INSTALL.EXE" "$OUT/src/TESTDRV.SYS"
+    printf '\xcd\x20' > "$OUT/src/TESTTOOL.COM"      # INT 20h
+    cp "$ROOT/build/INSTALL.EXE" "$OUT/src/TESTVXD.386"
+fi
 printf 'org 100h\nmov dx,501h\nout dx,al\nint 20h\n' > "$OUT/qexit.asm" && nasm -f bin -o "$OUT/src/QEXIT.COM" "$OUT/qexit.asm"
 if [ -n "${MENU:-}" ]; then   # multi-config CONFIG.SYS
     { echo '[menu]'; echo 'menuitem=STD,Standard'; echo 'menudefault=STD,0'; echo '[STD]'; echo 'DEVICE=A:\HIMEM.SYS'; echo '[common]'; echo 'FILES=30'; } | crlf > "$OUT/CONFIG.SYS"
 else
     { echo 'DEVICE=A:\HIMEM.SYS'; echo 'DOS=HIGH'; echo 'FILES=30'; } | crlf > "$OUT/CONFIG.SYS"
 fi
-cp "$ROOT/build/INSTALL.EXE" "$OUT/src/TESTVXD.386"
 # the steps run in RUN.BAT: INSTALL changes AUTOEXEC.BAT while it runs
 {
     echo '@ECHO OFF'
     echo 'A:\SRC\INSTALL.EXE'
-    [ -n "${UNINST:-}" ] && echo 'A:\TESTDRV\INSTALL.EXE /U'
+    [ -n "${UNINST:-}" ] && echo "A:\\$TARGET\\INSTALL.EXE /U"
     echo 'ECHO === CONFIG.SYS > AUX'; echo 'TYPE A:\CONFIG.SYS > AUX'
     echo 'ECHO === AUTOEXEC.BAT > AUX'; echo 'TYPE A:\AUTOEXEC.BAT > AUX'
-    echo 'ECHO === TARGET > AUX'; echo 'DIR A:\TESTDRV > AUX'
+    echo 'ECHO === TARGET > AUX'; echo "DIR A:\\$TARGET > AUX"
     echo 'ECHO === BACKUPS > AUX'; echo 'DIR A:\*.G0? > AUX'
     echo 'A:\SRC\QEXIT'
 } | crlf > "$OUT/src/RUN.BAT"

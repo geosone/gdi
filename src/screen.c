@@ -247,9 +247,19 @@ int scr_buttons( int y, int x, int w, const char **labels, int n, int sel )
 /* message window with buttons; returns the chosen button or -1 */
 int scr_message( const char *title, const char *text, const char **buttons, int n, int sel, int error )
 {
-	int w = 60, lines = scr_text( 0, 0, w - 4, 99, 0, text, 0 );
-	int h = lines + 6, x = ( COLS - w ) / 2, y = ( ROWS - h ) / 2;
+	int w = 60, lines = scr_text( 0, 0, w - 4, 99, 0, text, 0 ), h, x, y;
 	int attr = error ? A_ERROR : A_WIN;
+	if ( lines > 12 ) {   /* long texts: wider, at most between the bars */
+		w = COLS - 4;
+		lines = scr_text( 0, 0, w - 4, 99, 0, text, 0 );
+	}
+	if ( lines > ROWS - 8 )
+		lines = ROWS - 8;
+	h = lines + 6;
+	x = ( COLS - w ) / 2;
+	y = ( ROWS - h ) / 2;
+	if ( y < 1 )
+		y = 1;
 	scr_window( x, y, w, h, attr, title );
 	scr_text( x + 2, y + 2, w - 4, lines, error ? attr : A_WINTXT, text, 1 );
 	return scr_buttons( y + h - 3, x, w, buttons, n, sel );
@@ -269,6 +279,12 @@ int scr_input( const char *title, const char *text, char *buf, int max )
 		scr_cursor( fx + len, fy );
 		k = scr_key();
 		if ( k == 13 ) {
+			int i = 0;
+			while ( buf[i] == ' ' )
+				i++;
+			memmove( buf, buf + i, strlen( buf + i ) + 1 );
+			for ( len = strlen( buf ); len && buf[len - 1] == ' '; )
+				buf[--len] = 0;
 			scr_cursor( -1, -1 );
 			return 0;
 		}

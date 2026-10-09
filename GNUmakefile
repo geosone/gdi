@@ -8,7 +8,7 @@ CC   := $(WATCOM)/binl/wcc
 LINK := $(WATCOM)/binl/wlink
 COPT := -q -bt=dos -ms -0 -os -s -zq -wx -I$(WATCOM)/h
 
-OBJS := $(addprefix $(OUT)/,install.obj screen.obj ini.obj)
+OBJS := $(addprefix $(OUT)/,install.obj screen.obj ini.obj archive.obj)
 
 all: $(OUT)/INSTALL.EXE
 
@@ -27,3 +27,10 @@ clean:
 	rm -rf $(OUT)
 
 .PHONY: all clean
+
+# boot sector for the disk images (tools/boot/bs9x.asm -> tools/GdiDisk.cs)
+bootsector: | $(OUT)
+	nasm -f bin -o $(OUT)/bs9x.bin tools/boot/bs9x.asm
+	python3 -c "import base64,re,sys; p='tools/GdiDisk.cs'; s=open(p).read(); b=base64.b64encode(open('$(OUT)/bs9x.bin','rb').read()).decode(); open(p,'w').write(re.sub(r'(FromBase64String\(\n\t\t\t\")[^\"]*', lambda m: m.group(1)+b, s))"
+
+.PHONY: bootsector

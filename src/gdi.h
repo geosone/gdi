@@ -1,7 +1,7 @@
 /* gdi.h - GeosOne DOS Installer
  * Copyright (C) 2026 GeosOne.  GNU General Public License version 3. */
 
-#define GDI_VERSION "1.0"
+#define GDI_VERSION "1.1"
 
 /* screen.c */
 void scr_init( void );
@@ -26,8 +26,22 @@ void itoa_dec( int v, char *s );
 
 /* ini.c */
 int         ini_load( const char *path );
+void        ini_free( void );
+void        ini_save( void );
+void        ini_restore( void );
 const char *ini_get( const char *section, const char *key, const char *def );
 int         ini_next( const char *section, const char *key, int pos, const char **value );
 int         ini_lines( const char *section, int pos, const char **line );
+int         ini_text( const char *section, int pos, const char **line );
 char      **text_load( const char *path, int *nlines );
+void        text_free( char **lines, int nlines );
 char       *str_dup( const char *s );
+
+/* archive.c */
+const char *arc_install( const char *base, int (*target)( const char *name, char *path ) );
+const char *arc_errfile( void );
+
+/* install.c: called by archive.c */
+void gdi_progress( unsigned long done, unsigned long total );
+void gdi_progress_name( const char *name );
+int  gdi_ask_disk( int n );

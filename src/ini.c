@@ -37,6 +37,38 @@ static char *trim( char *s )
 	return s;
 }
 
+/* keep the loaded INI aside while another one is used (the disk with
+ * it may be gone); ini_restore() frees the other one and brings it back */
+static char **saved_line;
+static int *saved_sect, saved_n;
+
+void ini_save( void )
+{
+	saved_line = malloc( nline * sizeof(char *) );
+	saved_sect = malloc( nline * sizeof(int) );
+	memcpy( saved_line, line, nline * sizeof(char *) );
+	memcpy( saved_sect, sect, nline * sizeof(int) );
+	saved_n = nline;
+	nline = 0;
+}
+
+void ini_restore( void )
+{
+	ini_free();
+	memcpy( line, saved_line, saved_n * sizeof(char *) );
+	memcpy( sect, saved_sect, saved_n * sizeof(int) );
+	nline = saved_n;
+	free( saved_line );
+	free( saved_sect );
+}
+
+/* forget the loaded INI (to load another one) */
+void ini_free( void )
+{
+	while ( nline )
+		free( line[--nline] );
+}
+
 int ini_load( const char *path )
 {
 	FILE *f = fopen( path, "r" );
@@ -46,8 +78,8 @@ int ini_load( const char *path )
 		return -1;
 	while ( nline < MAXLINES && fgets( buf, sizeof(buf), f ) ) {
 		char *s = trim( buf );
-		if ( !*s || *s == ';' )
-			continue;
+		if ( *s == ';' || ( !*s && cur < 0 ) )
+			continue;   /* empty lines are kept for ini_text() */
 		line[nline] = str_dup( s );
 		if ( *s == '[' )
 			cur = nline;
@@ -91,12 +123,24 @@ const char *ini_get( const char *section, const char *key, const char *def )
 	return ini_next( section, key, 0, &v ) >= 0 ? v : def;
 }
 
+/* plain lines of a section, including empty lines */
+int ini_text( const char *section, int pos, const char **l )
+{
+	int i;
+	for ( i = pos; i < nline; i++ )
+		if ( in_section( i, section ) ) {
+			*l = line[i];
+			return i + 1;
+		}
+	return -1;
+}
+
 /* plain lines of a section */
 int ini_lines( const char *section, int pos, const char **l )
 {
 	int i;
 	for ( i = pos; i < nline; i++ )
-		if ( in_section( i, section ) ) {
+		if ( line[i][0] && in_section( i, section ) ) {
 			*l = line[i];
 			return i + 1;
 		}
@@ -134,4 +178,11 @@ char **text_load( const char *path, int *nlines )
 	fclose( f );
 	*nlines = n;
 	return l;
+}
+
+void text_free( char **l, int n )
+{
+	while ( n )
+		free( l[--n] );
+	free( l );
 }
