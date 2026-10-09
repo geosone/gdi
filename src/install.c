@@ -487,7 +487,11 @@ static void ed_add_ini( void )
 			ed_insert( ned, hdr );
 			i = ned - 1;
 		}
-		ed_insert( i + 1, line );
+		/* at the end of the section (before empty lines and the next one) */
+		for ( i++; i < ned && ed[i][0] != '['; i++ );
+		while ( i > 0 && !ed[i - 1][0] )
+			i--;
+		ed_insert( i, line );
 	}
 }
 

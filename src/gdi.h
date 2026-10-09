@@ -1,7 +1,7 @@
 /* gdi.h - GeosOne DOS Installer
  * Copyright (C) 2026 GeosOne.  GNU General Public License version 3. */
 
-#define GDI_VERSION "1.1"
+#define GDI_VERSION "1.1.1"
 
 /* screen.c */
 void scr_init( void );
