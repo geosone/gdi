@@ -175,13 +175,12 @@ static int write_patched( const char *path, const char *temporary,
 	return HEXPATCH_OK;
 }
 
-int hexpatch_file( const char *path, const unsigned char *before,
-	const unsigned char *after, int length, int expected )
+static int inspect_patch( const char *path, const unsigned char *before,
+	const unsigned char *after, int length, int expected, long *offsets )
 {
 	FILE *file;
-	long offsets[32], unused[1];
-	char temporary[80], backup[80];
-	int before_count, after_count, result;
+	long unused[1];
+	int before_count, after_count, i;
 
 	if ( length < 1 || length > HEXPATCH_MAX_BYTES || expected < 1 || expected > 32 ||
 		!memcmp( before, after, length ) )
@@ -199,9 +198,29 @@ int hexpatch_file( const char *path, const unsigned char *before,
 		return HEXPATCH_ALREADY;
 	if ( before_count != expected || after_count != 0 )
 		return HEXPATCH_MISMATCH;
-	for ( result = 1; result < expected; result++ )
-		if ( offsets[result] < offsets[result - 1] + length )
+	for ( i = 1; i < expected; i++ )
+		if ( offsets[i] < offsets[i - 1] + length )
 			return HEXPATCH_MISMATCH;
+	return HEXPATCH_OK;
+}
+
+int hexpatch_probe( const char *path, const unsigned char *before,
+	const unsigned char *after, int length, int expected )
+{
+	long offsets[32];
+	return inspect_patch( path, before, after, length, expected, offsets );
+}
+
+int hexpatch_file( const char *path, const unsigned char *before,
+	const unsigned char *after, int length, int expected )
+{
+	long offsets[32];
+	char temporary[80], backup[80];
+	int result;
+
+	result = inspect_patch( path, before, after, length, expected, offsets );
+	if ( result != HEXPATCH_OK )
+		return result;
 
 	side_name( temporary, path, ".$$$" );
 	remove( temporary );

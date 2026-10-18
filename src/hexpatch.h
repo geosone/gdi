@@ -12,6 +12,8 @@
 #define HEXPATCH_BAD_VALUE -3
 
 int hexpatch_parse( const char *text, unsigned char *bytes, int max );
+int hexpatch_probe( const char *path, const unsigned char *before,
+	const unsigned char *after, int length, int expected );
 int hexpatch_file( const char *path, const unsigned char *before,
 	const unsigned char *after, int length, int expected );
 

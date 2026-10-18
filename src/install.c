@@ -725,51 +725,178 @@ static int patch_split( const char *value, char *path, char *old_hex,
 	return *end || *expected < 1 || *expected > 32 ? -1 : 0;
 }
 
+#define MAX_PATCH_VARIANTS 32
+
+typedef struct {
+	char group[24], label[24], path[80];
+	unsigned char before[HEXPATCH_MAX_BYTES], after[HEXPATCH_MAX_BYTES];
+	int length, expected, processed;
+} PatchVariant;
+
+/* PatchVariant=group|label|file|old bytes|new bytes|exact count.
+ * Entries sharing a group are alternatives; their exact signatures select
+ * the language/build without trusting a localized version string. */
+static int patch_variant_split( const char *value, PatchVariant *variant )
+{
+	char data[256], *field[6], *bar, *end;
+	int i, old_length, new_length;
+	if ( strlen( value ) >= sizeof(data) )
+		return -1;
+	strcpy( data, value );
+	field[0] = data;
+	for ( i = 0; i < 5; i++ ) {
+		bar = strchr( field[i], '|' );
+		if ( !bar )
+			return -1;
+		*bar = 0;
+		field[i + 1] = bar + 1;
+	}
+	if ( strchr( field[5], '|' ) )
+		return -1;
+	for ( i = 0; i < 6; i++ )
+		field[i] = trim_field( field[i] );
+	for ( i = 0; i < 6; i++ )
+		if ( !*field[i] )
+			return -1;
+	sprintf( variant->group, "%.23s", field[0] );
+	sprintf( variant->label, "%.23s", field[1] );
+	expand( variant->path, field[2], sizeof(variant->path) );
+	old_length = hexpatch_parse( field[3], variant->before,
+		sizeof(variant->before) );
+	new_length = hexpatch_parse( field[4], variant->after,
+		sizeof(variant->after) );
+	variant->expected = (int)strtol( field[5], &end, 10 );
+	while ( *end == ' ' || *end == '\t' )
+		end++;
+	if ( *end || old_length < 1 || old_length != new_length ||
+		variant->expected < 1 || variant->expected > 32 )
+		return -1;
+	variant->length = old_length;
+	variant->processed = 0;
+	return 0;
+}
+
 static int hexpatch_needs_windows( void )
 {
+	static const char *keys[] = { "Patch", "PatchIfPresent", "PatchVariant" };
 	const char *value;
-	int pos = 0;
-	while ( ( pos = ini_next( "HexPatch", "Patch", pos, &value ) ) >= 0 )
-		if ( contains( value, "%WINDIR%" ) )
-			return 1;
+	int key, pos;
+	for ( key = 0; key < 3; key++ )
+		for ( pos = 0; ( pos = ini_next( "HexPatch", keys[key], pos,
+			&value ) ) >= 0; )
+			if ( contains( value, "%WINDIR%" ) )
+				return 1;
 	return 0;
+}
+
+static void patch_variants( void )
+{
+	static PatchVariant variants[MAX_PATCH_VARIANTS];
+	const char *value, *text;
+	char message[180];
+	int count = 0, pos = 0, i, j, selected, applicable, result, io_error;
+	int any_existing;
+
+	while ( ( pos = ini_next( "HexPatch", "PatchVariant", pos, &value ) ) >= 0 ) {
+		text = cond( value );
+		if ( !text )
+			continue;
+		if ( count == MAX_PATCH_VARIANTS ||
+			patch_variant_split( text, &variants[count] ) )
+			fail( T( "PatchDefinition", "Invalid [HexPatch] patch entry." ) );
+		if ( uninstall ) {
+			unsigned char swap[HEXPATCH_MAX_BYTES];
+			memcpy( swap, variants[count].before, variants[count].length );
+			memcpy( variants[count].before, variants[count].after,
+				variants[count].length );
+			memcpy( variants[count].after, swap, variants[count].length );
+		}
+		count++;
+	}
+	for ( i = 0; i < count; i++ ) {
+		if ( variants[i].processed )
+			continue;
+		selected = -1;
+		applicable = 0;
+		io_error = 0;
+		any_existing = 0;
+		for ( j = i; j < count; j++ )
+			if ( !stricmp( variants[i].group, variants[j].group ) ) {
+				variants[j].processed = 1;
+				if ( uninstall && !file_exists( variants[j].path ) )
+					continue;
+				any_existing = 1;
+				result = hexpatch_probe( variants[j].path, variants[j].before,
+					variants[j].after, variants[j].length,
+					variants[j].expected );
+				if ( result == HEXPATCH_OK || result == HEXPATCH_ALREADY ) {
+					selected = j;
+					applicable++;
+				} else if ( result == HEXPATCH_IO )
+					io_error = 1;
+			}
+		if ( uninstall && selected < 0 && !io_error && !any_existing )
+			continue;
+		if ( applicable != 1 ) {
+			if ( io_error && !applicable )
+				sprintf( message, "%s %s", T( "PatchError", "Cannot patch" ),
+					variants[i].path );
+			else
+				sprintf( message, "%s %s", T( "PatchMismatch",
+					"Binary signature has an unexpected match count in" ),
+					variants[i].path );
+			fail( message );
+		}
+		result = hexpatch_file( variants[selected].path,
+			variants[selected].before, variants[selected].after,
+			variants[selected].length, variants[selected].expected );
+		if ( result != HEXPATCH_OK && result != HEXPATCH_ALREADY ) {
+			sprintf( message, "%s %s", T( "PatchError", "Cannot patch" ),
+				variants[selected].path );
+			fail( message );
+		}
+	}
 }
 
 static void patch_all( void )
 {
+	static const char *keys[] = { "Patch", "PatchIfPresent" };
 	const char *value, *text;
 	unsigned char old_bytes[HEXPATCH_MAX_BYTES], new_bytes[HEXPATCH_MAX_BYTES];
 	char path[80], old_hex[96], new_hex[96], message[180];
-	int pos = 0, expected, old_length, new_length, result;
+	int key, pos, expected, old_length, new_length, result;
 
-	while ( ( pos = ini_next( "HexPatch", "Patch", pos, &value ) ) >= 0 ) {
-		text = cond( value );
-		if ( !text )
-			continue;
-		if ( patch_split( text, path, old_hex, new_hex, &expected ) ) {
-			fail( T( "PatchDefinition", "Invalid [HexPatch] Patch entry." ) );
+	for ( key = 0; key < 2; key++ )
+		for ( pos = 0; ( pos = ini_next( "HexPatch", keys[key], pos,
+			&value ) ) >= 0; ) {
+			text = cond( value );
+			if ( !text )
+				continue;
+			if ( patch_split( text, path, old_hex, new_hex, &expected ) )
+				fail( T( "PatchDefinition", "Invalid [HexPatch] Patch entry." ) );
+			old_length = hexpatch_parse( old_hex, old_bytes, sizeof(old_bytes) );
+			new_length = hexpatch_parse( new_hex, new_bytes, sizeof(new_bytes) );
+			if ( old_length < 1 || old_length != new_length )
+				fail( T( "PatchDefinition", "Invalid [HexPatch] Patch entry." ) );
+			if ( !file_exists( path ) && ( key == 1 || uninstall ) )
+				continue;
+			if ( uninstall ) {
+				unsigned char swap[HEXPATCH_MAX_BYTES];
+				memcpy( swap, old_bytes, old_length );
+				memcpy( old_bytes, new_bytes, old_length );
+				memcpy( new_bytes, swap, old_length );
+			}
+			result = hexpatch_file( path, old_bytes, new_bytes, old_length,
+				expected );
+			if ( result == HEXPATCH_OK || result == HEXPATCH_ALREADY )
+				continue;
+			if ( result == HEXPATCH_MISMATCH )
+				sprintf( message, "%s %s", T( "PatchMismatch", "Binary signature has an unexpected match count in" ), path );
+			else
+				sprintf( message, "%s %s", T( "PatchError", "Cannot patch" ), path );
+			fail( message );
 		}
-		old_length = hexpatch_parse( old_hex, old_bytes, sizeof(old_bytes) );
-		new_length = hexpatch_parse( new_hex, new_bytes, sizeof(new_bytes) );
-		if ( old_length < 1 || old_length != new_length )
-			fail( T( "PatchDefinition", "Invalid [HexPatch] Patch entry." ) );
-		if ( uninstall ) {
-			unsigned char swap[HEXPATCH_MAX_BYTES];
-			memcpy( swap, old_bytes, old_length );
-			memcpy( old_bytes, new_bytes, old_length );
-			memcpy( new_bytes, swap, old_length );
-		}
-		if ( uninstall && !file_exists( path ) )
-			continue;
-		result = hexpatch_file( path, old_bytes, new_bytes, old_length, expected );
-		if ( result == HEXPATCH_OK || result == HEXPATCH_ALREADY )
-			continue;
-		if ( result == HEXPATCH_MISMATCH )
-			sprintf( message, "%s %s", T( "PatchMismatch", "Binary signature has an unexpected match count in" ), path );
-		else
-			sprintf( message, "%s %s", T( "PatchError", "Cannot patch" ), path );
-		fail( message );
-	}
+	patch_variants();
 }
 
 static void edit_file( const char *path, const char *section, int kind )
@@ -1209,11 +1336,12 @@ static void ask_dirs( void )
 
 static int confirm( void )
 {
+	static const char *patch_keys[] = { "Patch", "PatchIfPresent" };
 	static char text[1500];
 	static const char *b[2];
 	const char *v, *t;
 	char line[160];
-	int pos;
+	int key, pos;
 	b[0] = T( "Install", "Install" );
 	b[1] = T( "Cancel", "Cancel" );
 	sprintf( text, "%s %s\n", T( "SumFiles", "Files to:" ), dest );
@@ -1245,14 +1373,26 @@ static int confirm( void )
 				sprintf( text + strlen( text ), "SYSTEM.INI [%.*s]: %s\n", (int)( strchr( t, '|' ) - t ), t, line );
 			}
 	}
+	for ( key = 0; key < 2; key++ )
+		for ( pos = 0; ( pos = ini_next( "HexPatch", patch_keys[key], pos,
+			&v ) ) >= 0; )
+			if ( ( t = cond( v ) ) != NULL ) {
+				char path[80], old_hex[96], new_hex[96];
+				int expected;
+				if ( !patch_split( t, path, old_hex, new_hex, &expected ) &&
+					( key == 0 || file_exists( path ) ) &&
+					strlen( text ) + strlen( path ) + 20 < sizeof(text) )
+					sprintf( text + strlen( text ), "%s: %s\n",
+						T( "SumPatch", "Binary patch" ), path );
+			}
 	pos = 0;
-	while ( ( pos = ini_next( "HexPatch", "Patch", pos, &v ) ) >= 0 )
+	while ( ( pos = ini_next( "HexPatch", "PatchVariant", pos, &v ) ) >= 0 )
 		if ( ( t = cond( v ) ) != NULL ) {
-			char path[80], old_hex[96], new_hex[96];
-			int expected;
-			if ( !patch_split( t, path, old_hex, new_hex, &expected ) &&
-				strlen( text ) + strlen( path ) + 20 < sizeof(text) )
-				sprintf( text + strlen( text ), "%s: %s\n", T( "SumPatch", "Binary patch" ), path );
+			PatchVariant variant;
+			if ( !patch_variant_split( t, &variant ) &&
+				strlen( text ) + strlen( variant.path ) + 40 < sizeof(text) )
+				sprintf( text + strlen( text ), "%s (%s): %s\n",
+					T( "SumPatch", "Binary patch" ), variant.label, variant.path );
 		}
 	strcat( text, T( "SumBackup", "\nThe original files are kept as *.G01, *.G02, ..." ) );
 	scr_keys( T( "KeysMsg", "Enter=Select  Esc=Abort" ) );
@@ -1264,6 +1404,8 @@ static int find_used( const char *name )
 {
 	static const char *sect[] = { "Config.sys", "Autoexec.bat", "System.ini" };
 	static const char *keys[] = { "Add", "Extend" };
+	static const char *patch_keys[] = { "Patch", "PatchIfPresent",
+		"PatchVariant" };
 	char var[20];
 	const char *v, *t;
 	int s, k, pos;
@@ -1273,9 +1415,11 @@ static int find_used( const char *name )
 			for ( pos = 0; ( pos = ini_next( sect[s], keys[k], pos, &v ) ) >= 0; )
 				if ( ( t = cond( v ) ) != NULL && contains( t, var ) )
 					return 1;
-	for ( pos = 0; ( pos = ini_next( "HexPatch", "Patch", pos, &v ) ) >= 0; )
-		if ( ( t = cond( v ) ) != NULL && contains( t, var ) )
-			return 1;
+	for ( k = 0; k < 3; k++ )
+		for ( pos = 0; ( pos = ini_next( "HexPatch", patch_keys[k], pos,
+			&v ) ) >= 0; )
+			if ( ( t = cond( v ) ) != NULL && contains( t, var ) )
+				return 1;
 	return 0;
 }
 

@@ -63,12 +63,13 @@ fi
 if [ -n "${HEXPATCH:-}" ]; then
     mmd -i "$P" ::/WINDOWS/SYSTEM
     printf '\x10\x66\xC7\x46\x49\xFF\xFF\x20\x66\xC7\x46\x49\xFF\xFF\x30' > "$OUT/WIN386.EXE"
-    mcopy -o -i "$P" "$OUT/WIN386.EXE" ::/WINDOWS/SYSTEM/
+    printf '\x10\xB9\x00\x00\x10\x00\x90\xE2\xFE\xCD\x20\x3F\x00\x01\x00\x2B\xC2\xB9\xE8\x03\x00\x00\xF7\xE1\xA3\x20' > "$OUT/NDIS.386"
+    mcopy -o -i "$P" "$OUT/WIN386.EXE" "$OUT/NDIS.386" ::/WINDOWS/SYSTEM/
 fi
 DEFAULT_KEYS="ret ret ret ret ret ret ret ret ret"
-[ -n "${HEXPATCH:-}" ] && [ -n "${UNINST:-}" ] && DEFAULT_KEYS="ret ret ret ret ret ret ret ret"
+[ -n "${HEXPATCH:-}" ] && [ -n "${UNINST:-}" ] && DEFAULT_KEYS="ret ret ret ret ret ret"
 KEYS=${KEYS:-$DEFAULT_KEYS}
-[ -n "${UNINST:-}" ] && KEYS="$KEYS ${UNKEYS:-left ret}"
+[ -n "${UNINST:-}" ] && KEYS="$KEYS ${UNKEYS:-r}"
 {
     sleep ${START:-8}; n=0
     for k in $KEYS; do n=$((n+1)); echo "screendump $OUT/s$n.ppm"; sleep 1; echo "sendkey $k"; sleep 2; done
@@ -81,10 +82,14 @@ tr -d '\r' < "$OUT/serial.log"
 if [ -n "${HEXPATCH:-}" ]; then
     mcopy -o -i "$P" ::/WINDOWS/SYSTEM/WIN386.EXE "$OUT/PATCHED.EXE"
     mcopy -o -i "$P" ::/WINDOWS/SYSTEM/WIN386.G01 "$OUT/ORIGINAL.EXE"
+    mcopy -o -i "$P" ::/WINDOWS/SYSTEM/NDIS.386 "$OUT/NDIS-PATCHED.386"
+    mcopy -o -i "$P" ::/WINDOWS/SYSTEM/NDIS.G01 "$OUT/NDIS-ORIGINAL.386"
     if [ -n "${UNINST:-}" ]; then
         python3 -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]).read_bytes(); b=pathlib.Path(sys.argv[2]).read_bytes(); assert p.count(bytes.fromhex("66 C7 46 49 FF FF")) == 2; assert b == p' "$OUT/PATCHED.EXE" "$OUT/ORIGINAL.EXE" || exit 1
+        python3 -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]).read_bytes(); b=pathlib.Path(sys.argv[2]).read_bytes(); assert p.count(bytes.fromhex("B9 00 00 10 00 90 E2 FE CD 20 3F 00 01 00 2B C2 B9 E8 03 00 00 F7 E1 A3")) == 1; assert b == p' "$OUT/NDIS-PATCHED.386" "$OUT/NDIS-ORIGINAL.386" || exit 1
     else
         python3 -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]).read_bytes(); b=pathlib.Path(sys.argv[2]).read_bytes(); assert p.count(bytes.fromhex("6A FF 8F 46 49 90")) == 2; assert b.count(bytes.fromhex("66 C7 46 49 FF FF")) == 2' "$OUT/PATCHED.EXE" "$OUT/ORIGINAL.EXE" || exit 1
+        python3 -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]).read_bytes(); b=pathlib.Path(sys.argv[2]).read_bytes(); assert p.count(bytes.fromhex("B9 00 00 40 06 E2 FE CD 20 3F 00 01 00 29 D0 75 01 40 6A 0A 59 F7 E1 A3")) == 1; assert b.count(bytes.fromhex("B9 00 00 10 00 90 E2 FE CD 20 3F 00 01 00 2B C2 B9 E8 03 00 00 F7 E1 A3")) == 1' "$OUT/NDIS-PATCHED.386" "$OUT/NDIS-ORIGINAL.386" || exit 1
     fi
     echo "DOS hexpatch integration passed"
 fi

@@ -54,6 +54,8 @@ int main( int argc, char **argv )
 	hexpatch_parse( "6A FF 8F 46 49 90", after, sizeof(after) );
 	if ( write_sample( path ) )
 		return 13;
+	if ( hexpatch_probe( path, before, after, length, 2 ) != HEXPATCH_OK )
+		return 20;
 	if ( hexpatch_file( path, before, after, length, 1 ) != HEXPATCH_MISMATCH )
 		return 14;
 	if ( hexpatch_file( path, before, after, length, 2 ) != HEXPATCH_OK )
@@ -62,6 +64,8 @@ int main( int argc, char **argv )
 		return 16;
 	if ( hexpatch_file( path, before, after, length, 2 ) != HEXPATCH_ALREADY )
 		return 17;
+	if ( hexpatch_probe( path, before, after, length, 2 ) != HEXPATCH_ALREADY )
+		return 21;
 	if ( hexpatch_file( path, after, before, length, 2 ) != HEXPATCH_OK )
 		return 18;
 	if ( count_pattern( path, before, length ) != 2 )

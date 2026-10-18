@@ -102,6 +102,11 @@ Add=2|386Enh|device=%DIR%\EUSBVXD.386   ; section|line
 [HexPatch]                     ; file|old bytes|new bytes|exact matches
 Patch=%WINDIR%\SYSTEM\WIN386.EXE|66 C7 46 49 FF FF|6A FF 8F 46 49 90|2
 Patch=1|%DIR%\PROGRAM.EXE|7503|EB03|1   ; optional condition
+; skip only when the target does not exist; reject an unknown existing file
+PatchIfPresent=%WINDIR%\SYSTEM\NDIS.386|...|...|1
+; group|language/build label|file|old bytes|new bytes|exact matches
+PatchVariant=Win311Fat32|English|%WINDIR%\SYSTEM\WIN386.EXE|...|...|2
+PatchVariant=Win311Fat32|German|%WINDIR%\SYSTEM\WIN386.EXE|...|...|2
 
 [Text]                          ; optional: translate the texts of the installer
 WelcomeTitle=Willkommen
@@ -131,6 +136,26 @@ program names are loaded next to `INSTALL.EXE`; `%BOOT%`, `%WINDIR%`, `%SRC%`
 and `[Find]` variables are expanded in the command line.
 
 **Binary patches:** `[HexPatch]` accepts hexadecimal byte pairs separated by spaces, commas, hyphens, or nothing. The old and new signatures must have the same length (up to 32 bytes), and the last field is the exact number of expected matches. Setup refuses an unknown or ambiguous file, writes the changed file through a temporary file, and keeps the original as `.G01`, `.G02`, and so on. Re-running Setup recognizes an already patched file. `INSTALL /U` applies the checked reverse transformation. The WIN386 example is the Windows 3.1/3.11 FAT32 compatibility patch; distributors should enable it only for an appropriate DOS/Windows combination.
+
+`PatchIfPresent=` has the same fields and safety checks as `Patch=`, but skips
+the operation when the target file is absent. It is intended for optional
+installed components such as WfW 3.11 networking. An existing file with an
+unknown or ambiguous signature remains a hard error; “optional” never means
+“patch an unverified binary.”
+
+The single WIN386 signature was statically verified against 44 Windows 3.1,
+Windows 3.11, and WfW 3.11 language/build variants; see
+[`docs/win386-fat32.md`](docs/win386-fat32.md). No language selection is shown.
+The WfW 3.11 NDIS CPU-speed patch and its 20-language audit are documented in
+[`docs/ndis386-cpu-speed.md`](docs/ndis386-cpu-speed.md).
+
+Use repeated `PatchVariant=` entries for language- or build-specific forms of
+one logical patch. The first field groups alternatives and the second is a
+human-readable label. Setup probes every alternative and proceeds only when
+exactly one before/already-patched signature matches, so selection is based on
+the binary itself rather than the configured Windows language. Do not replace
+the `...` placeholders above until the signatures have been verified against
+the exact vendor binaries.
 
 **Variables:**
 
