@@ -33,6 +33,7 @@ static const char *opt_label[MAXOPT];
 static char opt_value[MAXOPT][24];   /* %On%: value when option n is on */
 static int nopt;
 static int uninstall, dosmode, bootset;
+static const char *option_override;     /* /O:0101 from the Win16 frontend */
 static struct {
 	char name[16];
 	char path[80];
@@ -826,6 +827,12 @@ static void read_options( void )
 			opt_on[nopt] = !named_result( v + 2, bar - v - 2 );
 		else
 			opt_on[nopt] = !strnicmp( v, "on", 2 ) || *v == '1' || toupper( *v ) == 'Y';
+		if ( option_override && nopt < (int)strlen( option_override ) ) {
+			if ( option_override[nopt] == '0' )
+				opt_on[nopt] = 0;
+			else if ( option_override[nopt] == '1' )
+				opt_on[nopt] = 1;
+		}
 		bar = bar ? bar + 1 : v;
 		bar2 = strchr( bar, '|' );
 		sprintf( labels[nopt], "%.*s", bar2 ? (int)( bar2 - bar ) : 69, bar );
@@ -1426,11 +1433,12 @@ static void finish( void )
 static void usage( void )
 {
 	printf( "GeosOne DOS Installer " GDI_VERSION " - GNU GPL version 3\n"
-	        "INSTALL [/U] [/B:d:] [file.INI]\n"
+	        "INSTALL [/U] [/B:d:] [/O:bits] [file.INI]\n"
 	        "  installs as described by INSTALL.INI next to INSTALL.EXE\n"
 	        "  /U    removes the installation (run INSTALL.EXE in the target directory)\n"
 	        "  /B:d: drive of the system to change (CONFIG.SYS, AUTOEXEC.BAT),\n"
-	        "        default: the boot drive\n" );
+	        "        default: the boot drive\n"
+	        "  /O:   initial option states, e.g. /O:1010 (used by WINSTALL.EXE)\n" );
 }
 
 int main( int argc, char **argv )
@@ -1453,6 +1461,8 @@ int main( int argc, char **argv )
 			else if ( toupper( argv[i][1] ) == 'B' && argv[i][2] == ':' && isalpha( argv[i][3] ) ) {
 				boot[0] = toupper( argv[i][3] );
 				bootset = 1;
+			} else if ( toupper( argv[i][1] ) == 'O' && argv[i][2] == ':' ) {
+				option_override = argv[i] + 3;
 			} else {
 				usage();
 				return 0;

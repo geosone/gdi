@@ -16,6 +16,7 @@ rm -rf "$OUT"; mkdir -p "$OUT/src"
 cp "$BOOTIMG" "$OUT/boot.img"; chmod u+w "$OUT/boot.img"
 crlf() { sed 's/$/\r/'; }
 TARGET=${TARGET:-TESTDRV}
+ARGS=${ARGS:-}
 if [ -n "${PKG:-}" ]; then
     cp "$PKG"/* "$OUT/src/"
 else
@@ -38,7 +39,7 @@ fi
 # the steps run in RUN.BAT: INSTALL changes AUTOEXEC.BAT while it runs
 {
     echo '@ECHO OFF'
-    echo 'A:\SRC\INSTALL.EXE'
+    echo "A:\\SRC\\INSTALL.EXE $ARGS"
     [ -n "${UNINST:-}" ] && echo "A:\\$TARGET\\INSTALL.EXE /U"
     echo 'ECHO === CONFIG.SYS > AUX'; echo 'TYPE A:\CONFIG.SYS > AUX'
     echo 'ECHO === AUTOEXEC.BAT > AUX'; echo 'TYPE A:\AUTOEXEC.BAT > AUX'

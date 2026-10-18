@@ -1,0 +1,259 @@
+/* wininstall.c - native Windows 3.1/9x frontend for GDI packages.
+ *
+ * Uses only the Win16 USER/GDI API and the Open Watcom C runtime. It reads
+ * the same INSTALL.INI as INSTALL.EXE, presents the component options as
+ * Windows controls and passes the selected option bitmap to the DOS engine.
+ * Detector-controlled defaults remain in the indeterminate (automatic)
+ * state, so the DOS engine can run the package-defined detector itself.
+ *
+ * Copyright (C) 2026 GeosOne. GNU General Public License version 3. */
+
+#include <windows.h>
+#include <string.h>
+#include <ctype.h>
+#include <stdio.h>
+#include "gdi.h"
+
+#define MAXOPT       16
+#define ID_OPTION    100
+#define ID_INSTALL   200
+#define ID_CANCEL    201
+
+static HINSTANCE app_instance;
+static HWND option_window[MAXOPT];
+static HFONT ui_font;
+static int option_count;
+static int has_automatic;
+static int win9x;
+static char source_dir[128];
+static char setup_title[80];
+static char product[100];
+static char welcome_text[1000];
+static char environment_text[80];
+static char option_label[MAXOPT][80];
+static char option_on[MAXOPT];
+
+static void path_cat( char *out, const char *dir, const char *name )
+{
+    strcpy( out, dir );
+    if ( *out && out[strlen( out ) - 1] != '\\' )
+        strcat( out, "\\" );
+    strcat( out, name );
+}
+
+static int file_exists( const char *path )
+{
+    OFSTRUCT of;
+    HFILE file = OpenFile( path, &of, OF_EXIST );
+    return file != HFILE_ERROR;
+}
+
+static void read_package( void )
+{
+    const char *value, *bar, *bar2;
+    int pos = 0, length;
+
+    sprintf( setup_title, "%.79s", ini_get( "Setup", "Title", "Setup" ) );
+    sprintf( product, "%.99s", ini_get( "Setup", "Product", "GDI package" ) );
+    welcome_text[0] = 0;
+    while ( ( pos = ini_text( "Welcome", pos, &value ) ) >= 0 &&
+            strlen( welcome_text ) + strlen( value ) < sizeof(welcome_text) - 3 ) {
+        if ( !*value )
+            strcat( welcome_text, "\r\n\r\n" );
+        else {
+            if ( *welcome_text && welcome_text[strlen( welcome_text ) - 1] != '\n' )
+                strcat( welcome_text, " " );
+            strcat( welcome_text, value );
+        }
+    }
+    if ( !*welcome_text )
+        wsprintf( welcome_text, "This program installs %s.", (LPSTR)product );
+
+    option_count = 0;
+    has_automatic = 0;
+    pos = 0;
+    while ( option_count < MAXOPT &&
+            ( pos = ini_next( "Options", "Option", pos, &value ) ) >= 0 ) {
+        bar = strchr( value, '|' );
+        if ( ( *value == '?' || ( *value == '!' && value[1] == '?' ) ) && bar ) {
+            option_on[option_count] = 2;  /* automatic: DOS engine detects */
+            has_automatic = 1;
+        } else
+            option_on[option_count] = !strnicmp( value, "on", 2 ) ||
+                                      *value == '1' || toupper( *value ) == 'Y';
+        bar = bar ? bar + 1 : value;
+        bar2 = strchr( bar, '|' );
+        length = bar2 ? bar2 - bar : strlen( bar );
+        if ( length > 79 )
+            length = 79;
+        sprintf( option_label[option_count], "%.*s", length, bar );
+        option_count++;
+    }
+}
+
+static HWND make_control( HWND parent, const char *class_name, const char *text,
+                          DWORD style, int x, int y, int width, int height, int id )
+{
+    HWND control = CreateWindow( class_name, text, WS_CHILD | WS_VISIBLE | style,
+                                 x, y, width, height, parent, (HMENU)id,
+                                 app_instance, NULL );
+    if ( control && ui_font )
+        SendMessage( control, WM_SETFONT, (WPARAM)ui_font, 0L );
+    return control;
+}
+
+static void start_dos_setup( HWND window )
+{
+    char installer[128], command[220], bits[MAXOPT + 1];
+    int i;
+    UINT result;
+    path_cat( installer, source_dir, "INSTALL.EXE" );
+    if ( !file_exists( installer ) ) {
+        MessageBox( window, "INSTALL.EXE was not found next to WINSTALL.EXE.",
+                    setup_title, MB_OK | MB_ICONEXCLAMATION );
+        return;
+    }
+    for ( i = 0; i < option_count; i++ ) {
+        int state = SendMessage( option_window[i], BM_GETCHECK, 0, 0L );
+        bits[i] = state == 2 ? 'x' : state ? '1' : '0';
+    }
+    bits[option_count] = 0;
+    wsprintf( command, "\"%s\" /O:%s", (LPSTR)installer, (LPSTR)bits );
+    result = WinExec( command, SW_SHOWNORMAL );
+    if ( result <= 32 ) {
+        MessageBox( window, "Windows could not start the DOS installation engine.",
+                    setup_title, MB_OK | MB_ICONEXCLAMATION );
+        return;
+    }
+    MessageBox( window,
+                "The installation engine has started. Complete setup in its DOS window.",
+                setup_title, MB_OK | MB_ICONINFORMATION );
+    ShowWindow( window, SW_MINIMIZE );
+}
+
+static long FAR PASCAL window_proc( HWND window, UINT message,
+                                    WPARAM wparam, LPARAM lparam )
+{
+    int i, rows, group_height, button_y;
+    (void)lparam;
+    switch ( message ) {
+    case WM_CREATE:
+        make_control( window, "STATIC", product, SS_LEFT,
+                      18, 14, 540, 20, 0 );
+        make_control( window, "STATIC", environment_text, SS_LEFT,
+                      18, 36, 540, 18, 0 );
+        make_control( window, "STATIC", welcome_text, SS_LEFT,
+                      18, 62, 540, 60, 0 );
+        if ( has_automatic )
+            make_control( window, "STATIC",
+                          ini_get( "Text", "WinAuto", "Three-state choices use automatic package detection." ),
+                          SS_LEFT, 18, 124, 540, 18, 0 );
+        rows = option_count > 8 ? 8 : option_count;
+        group_height = rows * 22 + 30;
+        make_control( window, "BUTTON", ini_get( "Text", "OptionsTitle", "Components" ),
+                      BS_GROUPBOX, 12, 144, 552, group_height, 0 );
+        for ( i = 0; i < option_count; i++ ) {
+            int column = i / 8;
+            int row = i % 8;
+            option_window[i] = make_control( window, "BUTTON", option_label[i],
+                                              ( option_on[i] == 2 ? BS_AUTO3STATE : BS_AUTOCHECKBOX ) |
+                                              WS_TABSTOP,
+                                              26 + column * 270, 166 + row * 22,
+                                              258, 20, ID_OPTION + i );
+            SendMessage( option_window[i], BM_SETCHECK, option_on[i], 0L );
+        }
+        button_y = 154 + group_height;
+        make_control( window, "BUTTON", ini_get( "Text", "Install", "Start setup" ),
+                      BS_DEFPUSHBUTTON | WS_TABSTOP,
+                      350, button_y, 100, 26, ID_INSTALL );
+        make_control( window, "BUTTON", ini_get( "Text", "Cancel", "Cancel" ),
+                      BS_PUSHBUTTON | WS_TABSTOP,
+                      462, button_y, 90, 26, ID_CANCEL );
+        return 0;
+    case WM_COMMAND:
+        if ( wparam == ID_INSTALL ) {
+            start_dos_setup( window );
+            return 0;
+        }
+        if ( wparam == ID_CANCEL ) {
+            DestroyWindow( window );
+            return 0;
+        }
+        break;
+    case WM_DESTROY:
+        PostQuitMessage( 0 );
+        return 0;
+    }
+    return DefWindowProc( window, message, wparam, lparam );
+}
+
+int PASCAL WinMain( HINSTANCE instance, HINSTANCE previous,
+                    LPSTR command_line, int show )
+{
+    WNDCLASS window_class;
+    MSG message;
+    HWND window;
+    DWORD version;
+    unsigned major, minor;
+    char module[128], ini_path[128], *slash;
+    int rows, height, x, y;
+
+    (void)command_line;
+    app_instance = instance;
+    GetModuleFileName( instance, module, sizeof(module) );
+    strcpy( source_dir, module );
+    slash = strrchr( source_dir, '\\' );
+    if ( slash )
+        *slash = 0;
+    else
+        strcpy( source_dir, "." );
+    path_cat( ini_path, source_dir, "INSTALL.INI" );
+    if ( ini_load( ini_path ) ) {
+        MessageBox( NULL, "INSTALL.INI was not found next to WINSTALL.EXE.",
+                    "GDI", MB_OK | MB_ICONEXCLAMATION );
+        return 2;
+    }
+
+    version = GetVersion();
+    major = LOBYTE( LOWORD( version ) );
+    minor = HIBYTE( LOWORD( version ) );
+    win9x = major >= 4 || ( major == 3 && minor >= 90 );
+    wsprintf( environment_text, "Native Win16 setup - Windows %u.%02u (%s)",
+              major, minor, win9x ? "Windows 9x/ME" : "Windows 3.x" );
+    read_package();
+
+    if ( !previous ) {
+        memset( &window_class, 0, sizeof(window_class) );
+        window_class.style = CS_HREDRAW | CS_VREDRAW;
+        window_class.lpfnWndProc = window_proc;
+        window_class.hInstance = instance;
+        window_class.hIcon = LoadIcon( NULL, IDI_APPLICATION );
+        window_class.hCursor = LoadCursor( NULL, IDC_ARROW );
+        window_class.hbrBackground = (HBRUSH)( COLOR_BTNFACE + 1 );
+        window_class.lpszClassName = "GDIWinInstall";
+        if ( !RegisterClass( &window_class ) ) {
+            ini_free();
+            return 2;
+        }
+    }
+    ui_font = GetStockObject( SYSTEM_FONT );
+    rows = option_count > 8 ? 8 : option_count;
+    height = 235 + rows * 22;
+    x = ( GetSystemMetrics( SM_CXSCREEN ) - 580 ) / 2;
+    y = ( GetSystemMetrics( SM_CYSCREEN ) - height ) / 2;
+    window = CreateWindow( "GDIWinInstall", setup_title,
+                           WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+                           x, y, 580, height, NULL, NULL, instance, NULL );
+    if ( !window ) {
+        ini_free();
+        return 2;
+    }
+    ShowWindow( window, show );
+    UpdateWindow( window );
+    while ( GetMessage( &message, NULL, 0, 0 ) ) {
+        TranslateMessage( &message );
+        DispatchMessage( &message );
+    }
+    ini_free();
+    return message.wParam;
+}

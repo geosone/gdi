@@ -7,10 +7,12 @@ OUT ?= build
 CC   := $(WATCOM)/binl/wcc
 LINK := $(WATCOM)/binl/wlink
 COPT := -q -bt=dos -ms -0 -os -s -zq -wx -I$(WATCOM)/h
+WCOPT := -q -bt=windows -ms -0 -zW -os -s -zq -w4 -we -I$(WATCOM)/h -I$(WATCOM)/h/win
 
 OBJS := $(addprefix $(OUT)/,install.obj screen.obj ini.obj archive.obj)
+WINOBJS := $(OUT)/wininstall.obj $(OUT)/winini.obj
 
-all: $(OUT)/INSTALL.EXE
+all: $(OUT)/INSTALL.EXE $(OUT)/WINSTALL.EXE
 
 $(OUT):
 	mkdir -p $@
@@ -22,6 +24,18 @@ $(OUT)/INSTALL.EXE: $(OBJS)
 	$(LINK) option quiet format dos name $@ option map=$(OUT)/INSTALL.map \
 	  $(foreach o,$(OBJS),file $(o)) libpath $(WATCOM)/lib286/dos libpath $(WATCOM)/lib286 \
 	  option stack=8k
+
+$(OUT)/wininstall.obj: src/wininstall.c src/gdi.h | $(OUT)
+	$(CC) $(WCOPT) -fo=$@ $<
+
+$(OUT)/winini.obj: src/ini.c src/gdi.h | $(OUT)
+	$(CC) $(WCOPT) -fo=$@ $<
+
+$(OUT)/WINSTALL.EXE: $(WINOBJS)
+	$(LINK) option quiet format windows name $@ option map=$(OUT)/WINSTALL.map \
+	  $(foreach o,$(WINOBJS),file $(o)) libpath $(WATCOM)/lib286/win \
+	  libpath $(WATCOM)/lib286 library windows,clibs \
+	  option stack=8k,heapsize=4k,version=3.10
 
 clean:
 	rm -rf $(OUT)
