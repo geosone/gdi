@@ -67,7 +67,7 @@ if [ -n "${HEXPATCH:-}" ]; then
     mcopy -o -i "$P" "$OUT/WIN386.EXE" "$OUT/NDIS.386" ::/WINDOWS/SYSTEM/
 fi
 DEFAULT_KEYS="ret ret ret ret ret ret ret ret ret"
-[ -n "${HEXPATCH:-}" ] && [ -n "${UNINST:-}" ] && DEFAULT_KEYS="ret ret ret ret ret ret"
+[ -n "${UNINST:-}" ] && DEFAULT_KEYS="ret ret ret ret ret ret"
 KEYS=${KEYS:-$DEFAULT_KEYS}
 [ -n "${UNINST:-}" ] && KEYS="$KEYS ${UNKEYS:-r}"
 {
@@ -79,6 +79,16 @@ KEYS=${KEYS:-$DEFAULT_KEYS}
     -device isa-debug-exit,iobase=0x501,iosize=0x02 > "$OUT/monitor.log" 2>&1
 for f in "$OUT"/*.ppm; do [ -f "$f" ] && magick "$f" "${f%.ppm}.png" && rm -f "$f"; done
 tr -d '\r' < "$OUT/serial.log"
+if [ -n "${SYSTEMSET:-}" ]; then
+    mcopy -o -i "$P" ::/WINDOWS/SYSTEM.INI "$OUT/SYSTEM-AFTER.INI"
+    if [ -n "${UNINST:-}" ]; then
+        python3 -c 'import pathlib,sys; s=pathlib.Path(sys.argv[1]).read_text(errors="replace").lower(); assert "shell=progman.exe" in s; assert "gdi-test-owner=" not in s' "$OUT/SYSTEM-AFTER.INI" || exit 1
+    else
+        mcopy -o -i "$P" ::/TESTDRV/SYSTEM.SET "$OUT/SYSTEM.SET"
+        python3 -c 'import pathlib,sys; s=pathlib.Path(sys.argv[1]).read_text(errors="replace").lower(); assert "shell=a:\\testdrv\\testvxd.386" in s; assert "gdi-test-owner=testdrv" in s' "$OUT/SYSTEM-AFTER.INI" || exit 1
+    fi
+    echo "DOS SYSTEM.INI Set integration passed"
+fi
 if [ -n "${HEXPATCH:-}" ]; then
     mcopy -o -i "$P" ::/WINDOWS/SYSTEM/WIN386.EXE "$OUT/PATCHED.EXE"
     mcopy -o -i "$P" ::/WINDOWS/SYSTEM/WIN386.G01 "$OUT/ORIGINAL.EXE"

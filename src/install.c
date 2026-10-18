@@ -665,6 +665,236 @@ static void ed_add_ini( void )
 	}
 }
 
+/* SYSTEM.INI: Set=cond|Section|key=value.  Original values are kept in a
+ * package-local journal, so uninstall can restore the exact previous line. */
+static void strip_eol( char *line )
+{
+	int length = strlen( line );
+	while ( length && ( line[length - 1] == '\n' || line[length - 1] == '\r' ||
+		line[length - 1] == 0x1A ) )
+		line[--length] = 0;
+}
+
+static int ini_header_is( const char *line, const char *section )
+{
+	int length;
+	while ( *line == ' ' || *line == '\t' )
+		line++;
+	if ( *line++ != '[' )
+		return 0;
+	length = strlen( section );
+	return !strnicmp( line, section, length ) && line[length] == ']';
+}
+
+static int ini_is_header( const char *line )
+{
+	while ( *line == ' ' || *line == '\t' )
+		line++;
+	return *line == '[';
+}
+
+static int ini_key_is( const char *line, const char *key )
+{
+	int length;
+	while ( *line == ' ' || *line == '\t' )
+		line++;
+	if ( *line == ';' || *line == '#' )
+		return 0;
+	length = strlen( key );
+	if ( strnicmp( line, key, length ) )
+		return 0;
+	line += length;
+	while ( *line == ' ' || *line == '\t' )
+		line++;
+	return *line == '=';
+}
+
+/* Return the matching key index, -1 if absent and -2 for duplicates.  End is
+ * the insertion point at the end of an existing section, or -1 if absent. */
+static int ini_find_key( const char *section, const char *key, int *end )
+{
+	int i, inside = 0, found = -1;
+	*end = -1;
+	for ( i = 0; i < ned; i++ ) {
+		if ( ini_is_header( ed[i] ) ) {
+			if ( inside ) {
+				*end = i;
+				break;
+			}
+			inside = ini_header_is( ed[i], section );
+			continue;
+		}
+		if ( inside && ini_key_is( ed[i], key ) ) {
+			if ( found >= 0 )
+				return -2;
+			found = i;
+		}
+	}
+	if ( inside && *end < 0 )
+		*end = ned;
+	return found;
+}
+
+static int system_set_split( const char *text, char *section, char *key,
+	char *line )
+{
+	const char *bar = strchr( text, '|' ), *equal;
+	char value[256];
+	int length;
+	if ( !bar || !( equal = strchr( bar + 1, '=' ) ) )
+		return -1;
+	length = bar - text;
+	if ( length < 1 || length > 39 )
+		return -1;
+	sprintf( section, "%.*s", length, text );
+	length = equal - bar - 1;
+	if ( length < 1 || length > 79 )
+		return -1;
+	sprintf( key, "%.*s", length, bar + 1 );
+	expand( value, equal + 1, sizeof(value) );
+	if ( strlen( key ) + strlen( value ) + 2 > 255 )
+		return -1;
+	sprintf( line, "%s=%s", key, value );
+	return 0;
+}
+
+/* A repeated install may reuse its original journal, but only when the same
+ * setting and installed value are described.  Never replace the saved
+ * pre-install value with the value written by the first run. */
+static int system_set_journal_matches( const char *path, const char *section,
+	const char *key, const char *line )
+{
+	FILE *file = fopen( path, "r" );
+	char header[40], old_section[40], old_key[80], flag[8];
+	char oldline[256], newline[256];
+	int matched = 0;
+	if ( !file || !fgets( header, sizeof(header), file ) )
+		goto error;
+	strip_eol( header );
+	if ( strcmp( header, "GDI-SYSTEM-SET 1" ) )
+		goto error;
+	while ( fgets( old_section, sizeof(old_section), file ) ) {
+		if ( !fgets( old_key, sizeof(old_key), file ) ||
+			!fgets( flag, sizeof(flag), file ) ||
+			!fgets( oldline, sizeof(oldline), file ) ||
+			!fgets( newline, sizeof(newline), file ) )
+			goto error;
+		strip_eol( old_section ); strip_eol( old_key ); strip_eol( flag );
+		strip_eol( oldline ); strip_eol( newline );
+		if ( strcmp( flag, "0" ) && strcmp( flag, "1" ) )
+			goto error;
+		if ( !stricmp( old_section, section ) && !stricmp( old_key, key ) ) {
+			if ( strcmp( newline, line ) || matched )
+				goto error;
+			matched = 1;
+		}
+	}
+	fclose( file );
+	return matched;
+
+error:
+	if ( file )
+		fclose( file );
+	return -1;
+}
+
+static int ed_set_ini( void )
+{
+	const char *value, *text;
+	char journal[80], section[40], key[80], line[256], header[44];
+	FILE *file = NULL;
+	int pos = 0, index, end, present, reuse;
+	path_cat( journal, dest, "SYSTEM.SET" );
+	reuse = file_exists( journal );
+	while ( ( pos = ini_next( "System.ini", "Set", pos, &value ) ) >= 0 ) {
+		text = cond( value );
+		if ( !text )
+			continue;
+		if ( system_set_split( text, section, key, line ) )
+			goto error;
+		index = ini_find_key( section, key, &end );
+		if ( index == -2 )
+			goto error;
+		if ( reuse ) {
+			if ( system_set_journal_matches( journal, section, key, line ) != 1 )
+				goto error;
+		} else if ( !file ) {
+			if ( !( file = fopen( journal, "w" ) ) ||
+				fprintf( file, "GDI-SYSTEM-SET 1\n" ) < 0 )
+				goto error;
+		}
+		present = index >= 0;
+		if ( !reuse && fprintf( file, "%s\n%s\n%d\n%s\n%s\n", section, key,
+			present, present ? ed[index] : "", line ) < 0 )
+			goto error;
+		if ( present ) {
+			free( ed[index] );
+			ed[index] = str_dup( line );
+		} else if ( end >= 0 ) {
+			while ( end > 0 && !ed[end - 1][0] )
+				end--;
+			ed_insert( end, line );
+		} else {
+			sprintf( header, "[%s]", section );
+			if ( ned && ed[ned - 1][0] )
+				ed_insert( ned, "" );
+			ed_insert( ned, header );
+			ed_insert( ned, line );
+		}
+	}
+	return file && fclose( file ) ? -1 : 0;
+
+error:
+	if ( file ) {
+		fclose( file );
+		remove( journal );
+	}
+	return -1;
+}
+
+static int ed_restore_ini( char *journal )
+{
+	FILE *file;
+	char header[40], section[40], key[80], flag[8], oldline[256], newline[256];
+	int index, end, present;
+	path_cat( journal, dest, "SYSTEM.SET" );
+	if ( !( file = fopen( journal, "r" ) ) )
+		return 0;
+	if ( !fgets( header, sizeof(header), file ) )
+		goto error;
+	strip_eol( header );
+	if ( strcmp( header, "GDI-SYSTEM-SET 1" ) )
+		goto error;
+	while ( fgets( section, sizeof(section), file ) ) {
+		if ( !fgets( key, sizeof(key), file ) ||
+			!fgets( flag, sizeof(flag), file ) ||
+			!fgets( oldline, sizeof(oldline), file ) ||
+			!fgets( newline, sizeof(newline), file ) )
+			goto error;
+		strip_eol( section ); strip_eol( key ); strip_eol( flag );
+		strip_eol( oldline ); strip_eol( newline );
+		present = !strcmp( flag, "1" );
+		if ( !present && strcmp( flag, "0" ) )
+			goto error;
+		index = ini_find_key( section, key, &end );
+		if ( index == -2 )
+			goto error;
+		/* Preserve an administrator's later change instead of overwriting it. */
+		if ( index >= 0 && !strcmp( ed[index], newline ) ) {
+			if ( present ) {
+				free( ed[index] );
+				ed[index] = str_dup( oldline );
+			} else
+				ed_delete( index );
+		}
+	}
+	return fclose( file ) ? -1 : 1;
+
+error:
+	fclose( file );
+	return -1;
+}
+
 static int has_active( const char *section, const char *key )
 {
 	const char *v;
@@ -901,12 +1131,26 @@ static void patch_all( void )
 
 static void edit_file( const char *path, const char *section, int kind )
 {
-	if ( !has_active( section, "Add" ) && !has_active( section, "Remove" ) && !has_active( section, "Extend" ) )
+	char set_journal[80];
+	int restored = 0, set_journal_exists = 0;
+	if ( kind == 2 && uninstall ) {
+		path_cat( set_journal, dest, "SYSTEM.SET" );
+		set_journal_exists = file_exists( set_journal );
+	}
+	if ( !has_active( section, "Add" ) && !has_active( section, "Remove" ) &&
+		!has_active( section, "Extend" ) &&
+		!( kind == 2 && ( has_active( section, "Set" ) ||
+			set_journal_exists ) ) )
 		return;
 	if ( ed_load( path ) && uninstall )
 		return;
 	if ( !uninstall && !stricmp( ini_get( section, "Replace", "no" ), "yes" ) )
 		ed_free();   /* a new file (the old one is kept as backup) */
+	if ( kind == 2 && uninstall ) {
+		restored = ed_restore_ini( set_journal );
+		if ( restored < 0 )
+			fail( T( "SetRestoreError", "Cannot restore SYSTEM.INI settings." ) );
+	}
 	ed_remove( section );
 	if ( kind != 2 )
 		ed_unextend( section );
@@ -916,11 +1160,15 @@ static void edit_file( const char *path, const char *section, int kind )
 		else
 			ed_add_dos( section, kind == 0 );
 	}
+	if ( kind == 2 && !uninstall && ed_set_ini() )
+		fail( T( "SetDefinition", "Invalid [System.ini] Set entry." ) );
 	if ( ed_save( path ) ) {
 		char msg[120];
 		sprintf( msg, "%s %s", T( "WriteError", "Cannot write" ), path );
 		fail( msg );
 	}
+	if ( restored > 0 )
+		remove( set_journal );
 	ed_free();
 }
 
@@ -1326,7 +1574,8 @@ static void ask_dirs( void )
 		}
 	}
 	find_dest();
-	if ( has_entry( "System.ini", "Add" ) || hexpatch_needs_windows() ) {
+	if ( has_entry( "System.ini", "Add" ) ||
+		has_entry( "System.ini", "Set" ) || hexpatch_needs_windows() ) {
 		find_windows();
 		if ( scr_input( T( "WinTitle", "Windows" ),
 			T( "WinText", "Windows directory for the SYSTEM.INI entries (empty: no Windows):" ), windir, 64 ) )
@@ -1372,6 +1621,14 @@ static int confirm( void )
 				expand( line, strchr( t, '|' ) + 1, sizeof(line) );
 				sprintf( text + strlen( text ), "SYSTEM.INI [%.*s]: %s\n", (int)( strchr( t, '|' ) - t ), t, line );
 			}
+		pos = 0;
+		while ( ( pos = ini_next( "System.ini", "Set", pos, &v ) ) >= 0 )
+			if ( ( t = cond( v ) ) != NULL && strchr( t, '|' ) ) {
+				expand( line, strchr( t, '|' ) + 1, sizeof(line) );
+				if ( strlen( text ) + strlen( line ) + 40 < sizeof(text) )
+					sprintf( text + strlen( text ), "SYSTEM.INI [%.*s]: %s\n",
+						(int)( strchr( t, '|' ) - t ), t, line );
+			}
 	}
 	for ( key = 0; key < 2; key++ )
 		for ( pos = 0; ( pos = ini_next( "HexPatch", patch_keys[key], pos,
@@ -1415,6 +1672,9 @@ static int find_used( const char *name )
 			for ( pos = 0; ( pos = ini_next( sect[s], keys[k], pos, &v ) ) >= 0; )
 				if ( ( t = cond( v ) ) != NULL && contains( t, var ) )
 					return 1;
+	for ( pos = 0; ( pos = ini_next( "System.ini", "Set", pos, &v ) ) >= 0; )
+		if ( ( t = cond( v ) ) != NULL && contains( t, var ) )
+			return 1;
 	for ( k = 0; k < 3; k++ )
 		for ( pos = 0; ( pos = ini_next( "HexPatch", patch_keys[k], pos,
 			&v ) ) >= 0; )

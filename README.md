@@ -98,6 +98,7 @@ Replace=yes                     ; write a new file (the old one is kept as backu
 [System.ini]                    ; Windows 3.x
 Remove=EUSBVXD.386
 Add=2|386Enh|device=%DIR%\EUSBVXD.386   ; section|line
+Set=3|boot|shell=%DIR%\CALMIRA.EXE      ; reversible section|key=value
 
 [HexPatch]                     ; file|old bytes|new bytes|exact matches
 Patch=%WINDIR%\SYSTEM\WIN386.EXE|66 C7 46 49 FF FF|6A FF 8F 46 49 90|2
@@ -134,6 +135,13 @@ can still change the choice. `Option=!?NAME|...` inverts the initial state.
 `?NAME` and `!?NAME` are also available in normal conditions. Relative
 program names are loaded next to `INSTALL.EXE`; `%BOOT%`, `%WINDIR%`, `%SRC%`
 and `[Find]` variables are expanded in the command line.
+
+**SYSTEM.INI values:** `Set=condition|section|key=value` replaces one named
+value instead of adding a duplicate line. Setup records the exact previous line
+in `%DIR%\SYSTEM.SET`. Uninstall restores it only while the installed value is
+still unchanged; a later administrator change is preserved. Duplicate existing
+keys and malformed journal data are rejected. This is suitable for reversible
+shell selection, for example `Set=3|boot|shell=%DIR%\CALMIRA.EXE`.
 
 **Binary patches:** `[HexPatch]` accepts hexadecimal byte pairs separated by spaces, commas, hyphens, or nothing. The old and new signatures must have the same length (up to 32 bytes), and the last field is the exact number of expected matches. Setup refuses an unknown or ambiguous file, writes the changed file through a temporary file, and keeps the original as `.G01`, `.G02`, and so on. Re-running Setup recognizes an already patched file. `INSTALL /U` applies the checked reverse transformation. The WIN386 example is the Windows 3.1/3.11 FAT32 compatibility patch; distributors should enable it only for an appropriate DOS/Windows combination.
 
