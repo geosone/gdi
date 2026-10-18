@@ -197,9 +197,20 @@ The boot sector is our own (`tools/boot/bs9x.asm`, `make bootsector`). The MS-DO
 
 ## Building
 
-Open Watcom 2.0 (`WATCOM=/opt/watcom`), GNU make:
+Clone recursively so the pinned UPX fork and its dependencies are present:
 
-    make            -> build/INSTALL.EXE (combined DOS MZ + Win16 NE)
+    git clone --recurse-submodules https://github.com/geosone/gdi.git
+
+For an existing checkout, run `git submodule update --init --recursive` once.
+Building requires Open Watcom 2.0 (`WATCOM=/opt/watcom`), GNU make, CMake,
+Ninja, and a host C++ compiler:
+
+    make            -> build/INSTALL.EXE (packed DOS MZ + packed Win16 NE)
+
+The build compiles the pinned UPX fork locally, packs `INSTALL.STB` as
+`INSTALL.PST`, links that DOS program as the stub of `INSTALL.UNP`, then packs
+the Win16 NE portion into the final `INSTALL.EXE`. Intermediate files remain in
+`build/` for diagnosis; distribute only `INSTALL.EXE`.
 
 **Tests:** `make test-host` checks the portable binary-patch engine. `test/run.sh` boots DOS in QEMU and runs a test installation with the keys sent through the QEMU monitor, then shows the changed files.
 

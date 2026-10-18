@@ -27,10 +27,12 @@ static int option_count;
 static int has_automatic;
 static int win9x;
 static int engine_running;
+static char source_sidecar[128];
 static char source_dir[128];
 static char module_path[128];
 static char engine_path[128];
 static char completion_path[128];
+static char package_ini[128];
 static char setup_title[80];
 static char product[100];
 static char welcome_text[1000];
@@ -51,6 +53,77 @@ static int file_exists( const char *path )
     OFSTRUCT of;
     HFILE file = OpenFile( path, &of, OF_EXIST );
     return file != HFILE_ERROR;
+}
+
+/* The Win16 UPX loader writes the original packed filename beside its
+ * temporary executable as UPX*.SRC. */
+static int packed_source_path( const char *module, char *path, unsigned path_size )
+{
+    char sidecar[128];
+    HFILE file;
+    unsigned i;
+    long size;
+
+    strcpy( sidecar, module );
+    i = strlen( sidecar );
+    if ( i < 3 )
+        return 0;
+    sidecar[i - 3] = 'S';
+    sidecar[i - 2] = 'R';
+    sidecar[i - 1] = 'C';
+    file = _lopen( sidecar, OF_READ | OF_SHARE_DENY_NONE );
+    if ( file == HFILE_ERROR )
+        return 0;
+    size = _llseek( file, 0, 2 );
+    if ( size <= 0 || size >= (long)path_size || _llseek( file, 0, 0 ) < 0 ||
+         _lread( file, path, (unsigned)size ) != (unsigned)size ) {
+        _lclose( file );
+        return 0;
+    }
+    path[size] = 0;
+    _lclose( file );
+    if ( !file_exists( path ) )
+        return 0;
+    file = _lcreat( sidecar, 0 );
+    if ( file == HFILE_ERROR || _lwrite( file, "!", 1 ) != 1 ) {
+        if ( file != HFILE_ERROR )
+            _lclose( file );
+        return 0;
+    }
+    _lclose( file );
+    strcpy( source_sidecar, sidecar );
+    return 1;
+}
+
+/* Return the first non-option command-line token as an explicit INI path. */
+static int command_ini( const char FAR *command, char *path, unsigned path_size )
+{
+    unsigned length;
+    int quoted;
+
+    while ( *command ) {
+        while ( *command == ' ' || *command == '\t' )
+            command++;
+        if ( !*command )
+            break;
+        quoted = *command == '"';
+        if ( quoted )
+            command++;
+        length = 0;
+        while ( *command && ( quoted ? *command != '"' :
+                              *command != ' ' && *command != '\t' ) ) {
+            if ( length + 1 < path_size )
+                path[length++] = *command;
+            command++;
+        }
+        path[length] = 0;
+        if ( quoted && *command == '"' )
+            command++;
+        if ( length && path[0] != '/' && path[0] != '-' )
+            return 1;
+    }
+    path[0] = 0;
+    return 0;
 }
 
 static int delete_file( const char *path )
@@ -74,6 +147,14 @@ static int read_completion( void )
         status = 0;
     _lclose( file );
     return status >= '0' && status <= '2' ? status - '0' : -1;
+}
+
+static void release_source_path( void )
+{
+    if ( *source_sidecar ) {
+        delete_file( source_sidecar );
+        source_sidecar[0] = 0;
+    }
 }
 
 /* Write the MZ part before the NE header to a temporary executable. */
@@ -242,7 +323,7 @@ static HWND make_control( HWND parent, const char *class_name, const char *text,
 
 static void start_dos_setup( HWND window )
 {
-    char ini_path[128], command[400], bits[MAXOPT + 1];
+    char command[400], bits[MAXOPT + 1];
     int i;
     UINT result;
     if ( engine_running )
@@ -257,9 +338,9 @@ static void start_dos_setup( HWND window )
         bits[i] = state == 2 ? 'x' : state ? '1' : '0';
     }
     bits[option_count] = 0;
-    path_cat( ini_path, source_dir, "INSTALL.INI" );
-    wsprintf( command, "%s /O:%s /W:%s %s", (LPSTR)engine_path,
-              (LPSTR)bits, (LPSTR)completion_path, (LPSTR)ini_path );
+    wsprintf( command, "\"%s\" /O:%s /W:\"%s\" \"%s\"",
+              (LPSTR)engine_path, (LPSTR)bits,
+              (LPSTR)completion_path, (LPSTR)package_ini );
     result = WinExec( command, SW_SHOWNORMAL );
     if ( result <= 32 ) {
         char error[120];
@@ -348,6 +429,7 @@ static long FAR PASCAL window_proc( HWND window, UINT message,
             delete_file( engine_path );
         if ( *completion_path )
             delete_file( completion_path );
+        release_source_path();
         PostQuitMessage( 0 );
         return 0;
     }
@@ -362,23 +444,32 @@ int PASCAL WinMain( HINSTANCE instance, HINSTANCE previous,
     HWND window;
     DWORD version;
     unsigned major, minor;
-    char module[128], ini_path[128], *slash;
+    char module[128], *slash;
     int rows, height, x, y;
 
-    (void)command_line;
     app_instance = instance;
     GetModuleFileName( instance, module, sizeof(module) );
     strcpy( module_path, module );
-    strcpy( source_dir, module );
+    if ( !packed_source_path( module, source_dir, sizeof(source_dir) ) )
+        strcpy( source_dir, module );
     slash = strrchr( source_dir, '\\' );
     if ( slash )
         *slash = 0;
     else
         strcpy( source_dir, "." );
-    path_cat( ini_path, source_dir, "INSTALL.INI" );
-    if ( ini_load( ini_path ) ) {
+    if ( command_ini( command_line, package_ini, sizeof(package_ini) ) ) {
+        strcpy( source_dir, package_ini );
+        slash = strrchr( source_dir, '\\' );
+        if ( slash )
+            *slash = 0;
+        else
+            strcpy( source_dir, "." );
+    } else
+        path_cat( package_ini, source_dir, "INSTALL.INI" );
+    if ( ini_load( package_ini ) ) {
         MessageBox( NULL, "INSTALL.INI was not found next to INSTALL.EXE.",
                     "GDI", MB_OK | MB_ICONEXCLAMATION );
+        release_source_path();
         return 2;
     }
 
@@ -402,6 +493,7 @@ int PASCAL WinMain( HINSTANCE instance, HINSTANCE previous,
         window_class.lpszClassName = "GDIWinInstall";
         if ( !RegisterClass( &window_class ) ) {
             ini_free();
+            release_source_path();
             return 2;
         }
     }
@@ -415,6 +507,7 @@ int PASCAL WinMain( HINSTANCE instance, HINSTANCE previous,
                            x, y, 580, height, NULL, NULL, instance, NULL );
     if ( !window ) {
         ini_free();
+        release_source_path();
         return 2;
     }
     ShowWindow( window, show );

@@ -1,0 +1,4 @@
+[submodule "vendor/build-deps/upx"]
+	path = vendor/build-deps/upx
+	url = https://github.com/geosone/upx.git
+	branch = win16-ne

@@ -3,6 +3,9 @@
 WATCOM ?= /opt/watcom
 export WATCOM
 OUT ?= build
+UPX_SRC := vendor/build-deps/upx
+UPX_BUILD := $(OUT)/tools/upx
+UPX := $(UPX_BUILD)/upx
 
 CC   := $(WATCOM)/binl/wcc
 LINK := $(WATCOM)/binl/wlink
@@ -12,6 +15,10 @@ WCOPT := -q -bt=windows -ms -0 -zW -os -s -zq -w4 -we -I$(WATCOM)/h -I$(WATCOM)/
 OBJS := $(addprefix $(OUT)/,install.obj screen.obj ini.obj archive.obj hexpatch.obj)
 WINOBJS := $(OUT)/wininstall.obj $(OUT)/winini.obj $(OUT)/winregtxn.obj
 DOSIMAGE := $(OUT)/INSTALL.STB
+DOSPACKED := $(OUT)/INSTALL.PST
+WINIMAGE := $(OUT)/INSTALL.UNP
+
+.DELETE_ON_ERROR:
 
 all: $(OUT)/INSTALL.EXE
 
@@ -26,6 +33,18 @@ $(DOSIMAGE): $(OBJS)
 	  $(foreach o,$(OBJS),file $(o)) libpath $(WATCOM)/lib286/dos libpath $(WATCOM)/lib286 \
 	  option stack=8k
 
+upx:
+	@test -f $(UPX_SRC)/vendor/ucl/src/ucl_init.c || { \
+	  echo "UPX submodules are missing; run: git submodule update --init --recursive" >&2; exit 1; }
+	cmake -S $(UPX_SRC) -B $(UPX_BUILD) -G Ninja \
+	  -DCMAKE_BUILD_TYPE=Release -DUPX_CONFIG_DISABLE_GITREV=ON \
+	  -DUPX_CONFIG_DISABLE_SELF_PACK_TEST=ON
+	cmake --build $(UPX_BUILD) --target upx
+
+$(DOSPACKED): $(DOSIMAGE) | upx
+	cp $< $@
+	$(UPX) --best $@
+
 $(OUT)/wininstall.obj: src/wininstall.c src/gdi.h | $(OUT)
 	$(CC) $(WCOPT) -fo=$@ $<
 
@@ -35,11 +54,16 @@ $(OUT)/winini.obj: src/ini.c src/gdi.h | $(OUT)
 $(OUT)/winregtxn.obj: src/regtxn.c src/regtxn.h | $(OUT)
 	$(CC) $(WCOPT) -fo=$@ $<
 
-$(OUT)/INSTALL.EXE: $(DOSIMAGE) $(WINOBJS)
+$(WINIMAGE): $(DOSPACKED) $(WINOBJS)
 	$(LINK) option quiet format windows name $@ option map=$(OUT)/INSTALLW.map \
 	  $(foreach o,$(WINOBJS),file $(o)) libpath $(WATCOM)/lib286/win \
 	  libpath $(WATCOM)/lib286 library windows,clibs \
-	  option stack=8k,heapsize=4k,version=3.10 option stub=$(DOSIMAGE)
+	  option stack=8k,heapsize=4k,version=3.10 option stub=$(DOSPACKED)
+
+$(OUT)/INSTALL.EXE: $(WINIMAGE) | upx
+	cp $< $@
+	$(UPX) --best $@
+	$(UPX) -t $@
 
 clean:
 	rm -rf $(OUT)
@@ -47,7 +71,7 @@ clean:
 test-host:
 	test/host.sh
 
-.PHONY: all clean test-host
+.PHONY: all clean test-host upx
 
 # boot sector for the disk images (tools/boot/bs9x.asm -> tools/GdiDisk.cs)
 bootsector: | $(OUT)
