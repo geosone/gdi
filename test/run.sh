@@ -25,6 +25,8 @@ else
     printf 'TESTDRV readme\nline 2\n' | crlf > "$OUT/src/README.TXT"
     cp "$ROOT/build/INSTALL.EXE" "$OUT/src/TESTDRV.SYS"
     printf '\xcd\x20' > "$OUT/src/TESTTOOL.COM"      # INT 20h
+    printf '\xb8\x00\x4c\xcd\x21' > "$OUT/src/YES.COM"
+    printf '\xb8\x01\x4c\xcd\x21' > "$OUT/src/NO.COM"
     cp "$ROOT/build/INSTALL.EXE" "$OUT/src/TESTVXD.386"
 fi
 printf 'org 100h\nmov dx,501h\nout dx,al\nint 20h\n' > "$OUT/qexit.asm" && nasm -f bin -o "$OUT/src/QEXIT.COM" "$OUT/qexit.asm"

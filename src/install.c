@@ -25,6 +25,7 @@
 #define MAXOPT   16
 #define MAXLINE  600
 #define MAXFIND  8
+#define MAXDETECT 16
 
 static char srcdir[80], dest[80], windir[80], boot[3] = "C:";
 static char opt_on[MAXOPT];
@@ -38,6 +39,11 @@ static struct {
 	char file[13];   /* found on the installation disk: copied to %DIR% */
 } finds[MAXFIND];   /* [Find] */
 static int nfind;
+static struct {
+	char name[16];
+	char result;
+} detects[MAXDETECT];   /* [Detect]: external program returned zero */
+static int ndetect;
 static FILE *logf;
 static const char *gdi_self;           /* argv[0] */
 static jmp_buf extra_abort;            /* an extra installation was cancelled */
@@ -121,6 +127,17 @@ static const char *find_path( const char *name, int n )
 	return "";
 }
 
+/* A named condition may come from [Detect] or [Find].  [Detect] takes
+ * precedence when the same name occurs in both sections. */
+static int named_result( const char *name, int n )
+{
+	int i;
+	for ( i = 0; i < ndetect; i++ )
+		if ( (int)strlen( detects[i].name ) == n && !strnicmp( detects[i].name, name, n ) )
+			return detects[i].result != 0;
+	return *find_path( name, n ) != 0;
+}
+
 /* "1,!2,?CDEX|text": options 1 on and 2 off, [Find] CDEX found; returns
  * the text or NULL */
 static const char *cond( const char *v )
@@ -142,7 +159,7 @@ static const char *cond( const char *v )
 			const char *q = ++p;
 			while ( p < bar && *p != ',' && *p != ' ' )
 				p++;
-			if ( ( *find_path( q, p - q ) != 0 ) == neg )
+			if ( named_result( q, p - q ) == neg )
 				return NULL;
 			continue;
 		}
@@ -681,6 +698,51 @@ static void find_files( void )
 	}
 }
 
+/* Run a command line and return its exit status.  A program without a path
+ * is taken from the directory containing INSTALL.EXE. */
+static int spawn_program( const char *cmdline )
+{
+	char line[200], prog[80], *argv[16];
+	int argc = 0;
+	char *p;
+	expand( line, cmdline, sizeof(line) );
+	for ( p = strtok( line, " " ); p && argc < 15; p = strtok( NULL, " " ) )
+		argv[argc++] = p;
+	argv[argc] = NULL;
+	if ( !argc )
+		return -1;
+	if ( !strchr( argv[0], '\\' ) && !strchr( argv[0], ':' ) )
+		path_cat( prog, srcdir, argv[0] );
+	else
+		strcpy( prog, argv[0] );
+	return spawnv( P_WAIT, prog, (const char * const *)argv );
+}
+
+/* [Detect] NAME=program arguments: NAME becomes true when the external
+ * program returns zero.  The installer has no knowledge of what it tests. */
+static void detect_all( void )
+{
+	const char *v;
+	int pos = 0;
+	ndetect = 0;
+	while ( ndetect < MAXDETECT && ( pos = ini_text( "Detect", pos, &v ) ) >= 0 ) {
+		const char *eq = strchr( v, '=' );
+		int n;
+		if ( !eq )
+			continue;
+		n = eq - v;
+		while ( n && ( v[n - 1] == ' ' || v[n - 1] == '\t' ) )
+			n--;
+		if ( !n || n > 15 )
+			continue;
+		sprintf( detects[ndetect].name, "%.*s", n, v );
+		while ( eq[1] == ' ' || eq[1] == '\t' )
+			eq++;
+		detects[ndetect].result = spawn_program( eq + 1 ) == 0;
+		ndetect++;
+	}
+}
+
 /* the files of [Find] that come from the installation disk go to %DIR% */
 static void find_dest( void )
 {
@@ -755,10 +817,15 @@ static void read_options( void )
 	const char *v;
 	int pos = 0;
 	while ( nopt < MAXOPT && ( pos = ini_next( "Options", "Option", pos, &v ) ) >= 0 ) {
-		/* Option=on|Label|value: %On% expands to value if the option is on */
+		/* Option=on|Label|value or ?NAME|Label: %On% expands to value */
 		const char *bar = strchr( v, '|' ), *bar2;
 		static char labels[MAXOPT][70];
-		opt_on[nopt] = !strnicmp( v, "on", 2 ) || *v == '1' || toupper( *v ) == 'Y';
+		if ( *v == '?' && bar )
+			opt_on[nopt] = named_result( v + 1, bar - v - 1 );
+		else if ( *v == '!' && v[1] == '?' && bar )
+			opt_on[nopt] = !named_result( v + 2, bar - v - 2 );
+		else
+			opt_on[nopt] = !strnicmp( v, "on", 2 ) || *v == '1' || toupper( *v ) == 'Y';
 		bar = bar ? bar + 1 : v;
 		bar2 = strchr( bar, '|' );
 		sprintf( labels[nopt], "%.*s", bar2 ? (int)( bar2 - bar ) : 69, bar );
@@ -1063,21 +1130,9 @@ static void copy_all( void )
  * without a path is taken from the directory of INSTALL.EXE */
 static int run_program( const char *cmdline )
 {
-	char line[200], prog[80], *argv[16];
-	int argc = 0, rc;
-	char *p;
-	expand( line, cmdline, sizeof(line) );
-	for ( p = strtok( line, " " ); p && argc < 15; p = strtok( NULL, " " ) )
-		argv[argc++] = p;
-	argv[argc] = NULL;
-	if ( !argc )
-		return -1;
-	if ( !strchr( argv[0], '\\' ) && !strchr( argv[0], ':' ) )
-		path_cat( prog, srcdir, argv[0] );
-	else
-		strcpy( prog, argv[0] );
+	int rc;
 	scr_exit();
-	rc = spawnv( P_WAIT, prog, (const char * const *)argv );
+	rc = spawn_program( cmdline );
 	scr_init();
 	scr_bars( ini_get( "Setup", "Title", "Setup" ), ini_get( "Setup", "Product", "GeosOne DOS Installer" ), "" );
 	scr_desktop();
@@ -1281,6 +1336,7 @@ static void use_ini( const char *dir )
 	if ( !dosmode )
 		find_windows();
 	find_files();
+	detect_all();
 	read_options();
 	scr_bars( ini_get( "Setup", "Title", "Setup" ), ini_get( "Setup", "Product", "GeosOne DOS Installer" ), "" );
 	scr_desktop();
@@ -1430,6 +1486,7 @@ int main( int argc, char **argv )
 	if ( !dosmode )
 		find_windows();
 	find_files();
+	detect_all();
 
 	scr_init();
 	scr_bars( ini_get( "Setup", "Title", "Setup" ), ini_get( "Setup", "Product", "GeosOne DOS Installer" ), "" );

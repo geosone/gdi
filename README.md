@@ -10,6 +10,7 @@ It does the following:
 - removes the installation again (`INSTALL /U`),
 - takes the files from compressed archives on several disks (GDA, deflate) and asks for the disks,
 - finds programs that are already installed (`[Find]`, e.g. MSCDEX or SHSUCDX),
+- runs package-supplied detection programs (`[Detect]`) and uses their exit status for option defaults and conditions,
 - in DOS mode: partitions and formats the hard disk (FDISK, FORMAT), installs a DOS and then installs further software from other disks (their `INSTALL.INI`) in the same run.
 
 License: GNU General Public License version 3.
@@ -46,10 +47,16 @@ Any number of lines of welcome text.
 Option=on|Load AHCIASPI.SYS in CONFIG.SYS
 Option=off|Load it into upper memory|HIGH      ; %O2% = "HIGH" if on
 Option=on|Also IDE channels
+Option=?TAPE|Install the tape driver           ; detected default
+Option=!?WIN9X|Install the DOS-only component  ; inverted detected default
 
 [Find]                          ; programs already installed: %NAME% = path
 CDEX=SHSUCDX.COM SHSUCDX.EXE MSCDEX.EXE
 ASPICD=ASPICD.SYS
+
+[Detect]                        ; arbitrary package programs, not built into GDI
+TAPE=ASPISCAN.COM /Q /TAPE     ; exit 0 = true, any other result = false
+WIN9X=WINCHECK.COM /Q /9X
 
 [Files]                         ; files to copy (from the INSTALL.EXE directory)
 AHCIASPI.SYS
@@ -86,7 +93,18 @@ Accept=Akzeptieren
 ...
 ```
 
-**Conditions:** `1,!2|text` means option 1 on and option 2 off; `?CDEX` means `[Find]` found CDEX. Text without a `|` always applies.
+**Conditions:** `1,!2|text` means option 1 on and option 2 off; `?CDEX`
+means `[Find]` found CDEX or the `[Detect]` program named CDEX returned zero.
+Text without a `|` always applies.
+
+**Detection programs:** `[Detect] NAME=command` is intentionally generic.
+The installer starts the command before showing the option list and remembers
+whether its exit status was zero. It does not know what the program tests.
+`Option=?NAME|...` uses that result as its initial check-box state; the user
+can still change the choice. `Option=!?NAME|...` inverts the initial state.
+`?NAME` and `!?NAME` are also available in normal conditions. Relative
+program names are loaded next to `INSTALL.EXE`; `%BOOT%`, `%WINDIR%`, `%SRC%`
+and `[Find]` variables are expanded in the command line.
 
 **Variables:**
 
