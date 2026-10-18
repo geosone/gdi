@@ -886,14 +886,95 @@ static void show_text( const char *title, const char *file, const char **buttons
 		abort_setup();
 }
 
+static void show_license( const char *value, const char **buttons )
+{
+	const char *bar = strchr( value, '|' );
+	char file[80], title[120];
+	if ( bar ) {
+		const char *name = value;
+		const char *end = bar;
+		int name_len;
+		while ( name < end && ( *name == ' ' || *name == '\t' ) )
+			name++;
+		while ( end > name && ( end[-1] == ' ' || end[-1] == '\t' ) )
+			end--;
+		while ( bar[1] == ' ' || bar[1] == '\t' )
+			bar++;
+		sprintf( file, "%.79s", bar + 1 );
+		name_len = end - name;
+		if ( name_len > 44 )
+			name_len = 44;
+		if ( name_len )
+			sprintf( title, "%.70s - %.*s",
+				T( "LicenseTitle", "License agreement" ), name_len, name );
+		else
+			sprintf( title, "%.119s", T( "LicenseTitle", "License agreement" ) );
+	} else {
+		sprintf( file, "%.79s", value );
+		sprintf( title, "%.119s", T( "LicenseTitle", "License agreement" ) );
+	}
+	show_text( title, file, buttons, 2, 1 );
+	scr_desktop();
+}
+
+/* A comma-separated number list selects License1=, License2=, ... . */
+static int is_license_list( const char *value )
+{
+	const char *p = value;
+	for ( ;; ) {
+		while ( *p == ' ' || *p == '\t' )
+			p++;
+		if ( !isdigit( *p ) )
+			return 0;
+		while ( isdigit( *p ) )
+			p++;
+		while ( *p == ' ' || *p == '\t' )
+			p++;
+		if ( !*p )
+			return 1;
+		if ( *p++ != ',' )
+			return 0;
+	}
+}
+
 static void license( void )
 {
-	if ( ini_get( "Setup", "License", NULL ) ) {
-		static const char *b[2];
-		b[0] = T( "Accept", "I accept" );
-		b[1] = T( "Decline", "Decline" );
-		show_text( T( "LicenseTitle", "License agreement" ), ini_get( "Setup", "License", NULL ), b, 2, 1 );
-		scr_desktop();
+	const char *value;
+	static const char *b[2];
+	int pos = 0, count = 0;
+	b[0] = T( "Accept", "I accept" );
+	b[1] = T( "Decline", "Decline" );
+	while ( ( pos = ini_next( "Setup", "License", pos, &value ) ) >= 0 ) {
+		if ( is_license_list( value ) ) {
+			const char *p = value;
+			while ( *p ) {
+				char key[20], msg[120];
+				int number = 0;
+				while ( *p == ' ' || *p == '\t' || *p == ',' )
+					p++;
+				if ( !*p )
+					break;
+				while ( isdigit( *p ) ) {
+					number = number * 10 + *p - '0';
+					p++;
+				}
+				if ( number < 1 || number > 9 )
+					fail( T( "LicenseRange", "License numbers must be between 1 and 9." ) );
+				if ( ++count > 9 )
+					fail( T( "LicenseLimit", "A package may contain at most 9 licenses." ) );
+				sprintf( key, "License%d", number );
+				value = ini_get( "Setup", key, NULL );
+				if ( !value ) {
+					sprintf( msg, "%s %s", T( "MissingLicense", "License entry not found:" ), key );
+					fail( msg );
+				}
+				show_license( value, b );
+			}
+		} else {
+			if ( ++count > 9 )
+				fail( T( "LicenseLimit", "A package may contain at most 9 licenses." ) );
+			show_license( value, b );
+		}
 	}
 }
 

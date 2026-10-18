@@ -43,7 +43,10 @@ the Windows frontend to the embedded DOS engine.
 [Setup]
 Title=AHCIASPI Setup            ; top bar, left
 Product=GeosOne AHCIASPI 0.1    ; top bar, right (brand)
-License=LICENSE.TXT             ; shown, must be accepted (optional)
+License=1,2,3                  ; numbered licenses, in display order
+License1=Main product|LICENSE.TXT
+License2=DOSLFN|DOSLFN.LIC
+License3=WinFile|WINFILE.LIC
 Readme=README.TXT               ; offered at the end (optional)
 DefaultDir=%BOOT%\AHCIASPI      ; proposed target directory
 Done=AHCIASPI is installed. Restart the computer to load the driver.
@@ -105,6 +108,14 @@ WelcomeTitle=Willkommen
 Accept=Akzeptieren
 ...
 ```
+
+For one license, the compatible short form `License=EULA.TXT` is sufficient.
+For several, `License=1,2,3` selects `License1=`, `License2=`, and `License3=`
+in that display order. Every selected license must be accepted before setup
+continues. Use `Name|file` to identify the component in the dialog title, or
+only `file` for the generic title. Repeated plain `License=` entries are also
+accepted. A package may select at most nine licenses (`License1` through
+`License9`). License-file paths are relative to `INSTALL.EXE`.
 
 **Conditions:** `1,!2|text` means option 1 on and option 2 off; `?CDEX`
 means `[Find]` found CDEX or the `[Detect]` program named CDEX returned zero.

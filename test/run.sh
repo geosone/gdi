@@ -23,6 +23,7 @@ else
     cp "$ROOT/build/INSTALL.EXE" "$OUT/src/"
     cp "$INI" "$OUT/src/INSTALL.INI"
     cp "$ROOT/LICENSE" "$OUT/src/LICENSE.TXT"
+    printf 'Second component license\nMust also be accepted.\n' | crlf > "$OUT/src/LICENSE2.TXT"
     printf 'TESTDRV readme\nline 2\n' | crlf > "$OUT/src/README.TXT"
     cp "$ROOT/build/INSTALL.EXE" "$OUT/src/TESTDRV.SYS"
     printf '\xcd\x20' > "$OUT/src/TESTTOOL.COM"      # INT 20h
@@ -64,8 +65,8 @@ if [ -n "${HEXPATCH:-}" ]; then
     printf '\x10\x66\xC7\x46\x49\xFF\xFF\x20\x66\xC7\x46\x49\xFF\xFF\x30' > "$OUT/WIN386.EXE"
     mcopy -o -i "$P" "$OUT/WIN386.EXE" ::/WINDOWS/SYSTEM/
 fi
-DEFAULT_KEYS="ret ret ret ret ret ret ret"
-[ -n "${HEXPATCH:-}" ] && [ -n "${UNINST:-}" ] && DEFAULT_KEYS="ret ret ret ret ret ret"
+DEFAULT_KEYS="ret ret ret ret ret ret ret ret ret"
+[ -n "${HEXPATCH:-}" ] && [ -n "${UNINST:-}" ] && DEFAULT_KEYS="ret ret ret ret ret ret ret ret"
 KEYS=${KEYS:-$DEFAULT_KEYS}
 [ -n "${UNINST:-}" ] && KEYS="$KEYS ${UNKEYS:-left ret}"
 {

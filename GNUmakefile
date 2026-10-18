@@ -41,7 +41,7 @@ upx:
 	  -DUPX_CONFIG_DISABLE_SELF_PACK_TEST=ON
 	cmake --build $(UPX_BUILD) --target upx
 
-$(DOSPACKED): $(DOSIMAGE) | upx
+$(DOSPACKED): $(DOSIMAGE) upx
 	cp $< $@
 	$(UPX) --best $@
 
@@ -60,7 +60,7 @@ $(WINIMAGE): $(DOSPACKED) $(WINOBJS)
 	  libpath $(WATCOM)/lib286 library windows,clibs \
 	  option stack=8k,heapsize=4k,version=3.10 option stub=$(DOSPACKED)
 
-$(OUT)/INSTALL.EXE: $(WINIMAGE) | upx
+$(OUT)/INSTALL.EXE: $(WINIMAGE) upx
 	cp $< $@
 	$(UPX) --best $@
 	$(UPX) -t $@
