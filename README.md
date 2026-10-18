@@ -160,10 +160,12 @@ engine steps into native Win16 code is the next stage; the INI format stays
 shared.
 
 Registry editing is designed as a native-engine feature, not as OpenASPI
-special handling. The draft transaction format and the different Windows 3.1
-and Windows 9x capabilities are specified in
-[`docs/registry.md`](docs/registry.md). It is intentionally not active until
-backup, uninstall restoration and failure rollback are implemented together.
+special handling. The shared strict parser, typed-data converter and lossless
+journal record are implemented and tested; the transaction format and the
+different Windows 3.1 and Windows 9x capabilities are specified in
+[`docs/registry.md`](docs/registry.md). Registry mutation remains intentionally
+inactive until the platform backends implement backup, uninstall restoration
+and failure rollback together.
 
 **[Find]** looks first on the installation disk (next to `INSTALL.EXE`): a file found there is installed to `%DIR%` with the other files (only if an active line uses its `%NAME%`) and removed again by `INSTALL /U`. So a distributor can put e.g. `ASPICD.SYS`, `ASPIDISK.SYS` or `MKELS120.SYS` on the disk. Otherwise it searches the computer: `%BOOT%\DOS`, the `PATH`, the Windows directory and its `COMMAND`, `%BOOT%\` and the paths named in `CONFIG.SYS` and `AUTOEXEC.BAT`.
 
@@ -203,7 +205,7 @@ Open Watcom 2.0 (`WATCOM=/opt/watcom`), GNU make:
 
 | Command | Test |
 |---|---|
-| `make test-host` | byte parsing, exact-match validation, backup, repeat and reverse patch |
+| `make test-host` | binary-patch checks plus registry plan/type/journal validation |
 | `test/run.sh` | installation |
 | `WINDOWS=1 HEXPATCH=1 INI=test/TESTHEX.INI test/run.sh` | DOS binary-patch integration (add `TARGET=TESTHEX UNINST=1` for reverse) |
 | `UNINST=1 test/run.sh` | installation and `INSTALL /U` |

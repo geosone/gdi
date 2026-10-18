@@ -10,7 +10,7 @@ COPT := -q -bt=dos -ms -0 -os -s -zq -wx -I$(WATCOM)/h
 WCOPT := -q -bt=windows -ms -0 -zW -os -s -zq -w4 -we -I$(WATCOM)/h -I$(WATCOM)/h/win
 
 OBJS := $(addprefix $(OUT)/,install.obj screen.obj ini.obj archive.obj hexpatch.obj)
-WINOBJS := $(OUT)/wininstall.obj $(OUT)/winini.obj
+WINOBJS := $(OUT)/wininstall.obj $(OUT)/winini.obj $(OUT)/winregtxn.obj
 DOSIMAGE := $(OUT)/INSTALL.STB
 
 all: $(OUT)/INSTALL.EXE
@@ -30,6 +30,9 @@ $(OUT)/wininstall.obj: src/wininstall.c src/gdi.h | $(OUT)
 	$(CC) $(WCOPT) -fo=$@ $<
 
 $(OUT)/winini.obj: src/ini.c src/gdi.h | $(OUT)
+	$(CC) $(WCOPT) -fo=$@ $<
+
+$(OUT)/winregtxn.obj: src/regtxn.c src/regtxn.h | $(OUT)
 	$(CC) $(WCOPT) -fo=$@ $<
 
 $(OUT)/INSTALL.EXE: $(DOSIMAGE) $(WINOBJS)
