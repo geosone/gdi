@@ -9,7 +9,7 @@ LINK := $(WATCOM)/binl/wlink
 COPT := -q -bt=dos -ms -0 -os -s -zq -wx -I$(WATCOM)/h
 WCOPT := -q -bt=windows -ms -0 -zW -os -s -zq -w4 -we -I$(WATCOM)/h -I$(WATCOM)/h/win
 
-OBJS := $(addprefix $(OUT)/,install.obj screen.obj ini.obj archive.obj)
+OBJS := $(addprefix $(OUT)/,install.obj screen.obj ini.obj archive.obj hexpatch.obj)
 WINOBJS := $(OUT)/wininstall.obj $(OUT)/winini.obj
 DOSIMAGE := $(OUT)/INSTALL.STB
 
@@ -18,7 +18,7 @@ all: $(OUT)/INSTALL.EXE
 $(OUT):
 	mkdir -p $@
 
-$(OUT)/%.obj: src/%.c src/gdi.h | $(OUT)
+$(OUT)/%.obj: src/%.c src/gdi.h src/hexpatch.h | $(OUT)
 	$(CC) $(COPT) -fo=$@ $<
 
 $(DOSIMAGE): $(OBJS)
@@ -41,7 +41,10 @@ $(OUT)/INSTALL.EXE: $(DOSIMAGE) $(WINOBJS)
 clean:
 	rm -rf $(OUT)
 
-.PHONY: all clean
+test-host:
+	test/host.sh
+
+.PHONY: all clean test-host
 
 # boot sector for the disk images (tools/boot/bs9x.asm -> tools/GdiDisk.cs)
 bootsector: | $(OUT)

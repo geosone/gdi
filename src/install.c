@@ -21,6 +21,7 @@
 #include <process.h>
 #include <setjmp.h>
 #include "gdi.h"
+#include "hexpatch.h"
 
 #define MAXOPT   16
 #define MAXLINE  600
@@ -523,6 +524,103 @@ static int has_active( const char *section, const char *key )
 	return 0;
 }
 
+static int has_entry( const char *section, const char *key )
+{
+	const char *value;
+	return ini_next( section, key, 0, &value ) >= 0;
+}
+
+/* [HexPatch] Patch=cond|file|old bytes|new bytes|exact count.  The
+ * condition is optional, as for other installer entries. */
+static char *trim_field( char *text )
+{
+	char *end;
+	while ( *text == ' ' || *text == '\t' )
+		text++;
+	end = text + strlen( text );
+	while ( end > text && ( end[-1] == ' ' || end[-1] == '\t' ) )
+		*--end = 0;
+	return text;
+}
+
+static int patch_split( const char *value, char *path, char *old_hex,
+	char *new_hex, int *expected )
+{
+	char data[256], *field[4], *bar, *end;
+	int i;
+	if ( strlen( value ) >= sizeof(data) )
+		return -1;
+	strcpy( data, value );
+	field[0] = data;
+	for ( i = 0; i < 3; i++ ) {
+		bar = strchr( field[i], '|' );
+		if ( !bar )
+			return -1;
+		*bar = 0;
+		field[i + 1] = bar + 1;
+	}
+	if ( strchr( field[3], '|' ) )
+		return -1;
+	for ( i = 0; i < 4; i++ )
+		field[i] = trim_field( field[i] );
+	if ( !*field[0] || !*field[1] || !*field[2] || !*field[3] )
+		return -1;
+	expand( path, field[0], 80 );
+	sprintf( old_hex, "%.95s", field[1] );
+	sprintf( new_hex, "%.95s", field[2] );
+	*expected = (int)strtol( field[3], &end, 10 );
+	while ( *end == ' ' || *end == '\t' )
+		end++;
+	return *end || *expected < 1 || *expected > 32 ? -1 : 0;
+}
+
+static int hexpatch_needs_windows( void )
+{
+	const char *value;
+	int pos = 0;
+	while ( ( pos = ini_next( "HexPatch", "Patch", pos, &value ) ) >= 0 )
+		if ( contains( value, "%WINDIR%" ) )
+			return 1;
+	return 0;
+}
+
+static void patch_all( void )
+{
+	const char *value, *text;
+	unsigned char old_bytes[HEXPATCH_MAX_BYTES], new_bytes[HEXPATCH_MAX_BYTES];
+	char path[80], old_hex[96], new_hex[96], message[180];
+	int pos = 0, expected, old_length, new_length, result;
+
+	while ( ( pos = ini_next( "HexPatch", "Patch", pos, &value ) ) >= 0 ) {
+		text = cond( value );
+		if ( !text )
+			continue;
+		if ( patch_split( text, path, old_hex, new_hex, &expected ) ) {
+			fail( T( "PatchDefinition", "Invalid [HexPatch] Patch entry." ) );
+		}
+		old_length = hexpatch_parse( old_hex, old_bytes, sizeof(old_bytes) );
+		new_length = hexpatch_parse( new_hex, new_bytes, sizeof(new_bytes) );
+		if ( old_length < 1 || old_length != new_length )
+			fail( T( "PatchDefinition", "Invalid [HexPatch] Patch entry." ) );
+		if ( uninstall ) {
+			unsigned char swap[HEXPATCH_MAX_BYTES];
+			memcpy( swap, old_bytes, old_length );
+			memcpy( old_bytes, new_bytes, old_length );
+			memcpy( new_bytes, swap, old_length );
+		}
+		if ( uninstall && !file_exists( path ) )
+			continue;
+		result = hexpatch_file( path, old_bytes, new_bytes, old_length, expected );
+		if ( result == HEXPATCH_OK || result == HEXPATCH_ALREADY )
+			continue;
+		if ( result == HEXPATCH_MISMATCH )
+			sprintf( message, "%s %s", T( "PatchMismatch", "Binary signature has an unexpected match count in" ), path );
+		else
+			sprintf( message, "%s %s", T( "PatchError", "Cannot patch" ), path );
+		fail( message );
+	}
+}
+
 static void edit_file( const char *path, const char *section, int kind )
 {
 	if ( !has_active( section, "Add" ) && !has_active( section, "Remove" ) && !has_active( section, "Extend" ) )
@@ -869,7 +967,7 @@ static void ask_dirs( void )
 		}
 	}
 	find_dest();
-	if ( has_active( "System.ini", "Add" ) ) {
+	if ( has_entry( "System.ini", "Add" ) || hexpatch_needs_windows() ) {
 		find_windows();
 		if ( scr_input( T( "WinTitle", "Windows" ),
 			T( "WinText", "Windows directory for the SYSTEM.INI entries (empty: no Windows):" ), windir, 64 ) )
@@ -915,6 +1013,15 @@ static int confirm( void )
 				sprintf( text + strlen( text ), "SYSTEM.INI [%.*s]: %s\n", (int)( strchr( t, '|' ) - t ), t, line );
 			}
 	}
+	pos = 0;
+	while ( ( pos = ini_next( "HexPatch", "Patch", pos, &v ) ) >= 0 )
+		if ( ( t = cond( v ) ) != NULL ) {
+			char path[80], old_hex[96], new_hex[96];
+			int expected;
+			if ( !patch_split( t, path, old_hex, new_hex, &expected ) &&
+				strlen( text ) + strlen( path ) + 20 < sizeof(text) )
+				sprintf( text + strlen( text ), "%s: %s\n", T( "SumPatch", "Binary patch" ), path );
+		}
 	strcat( text, T( "SumBackup", "\nThe original files are kept as *.G01, *.G02, ..." ) );
 	scr_keys( T( "KeysMsg", "Enter=Select  Esc=Abort" ) );
 	return scr_message( T( "SumTitle", "Ready to install" ), text, b, 2, 0, 0 ) == 0;
@@ -934,6 +1041,9 @@ static int find_used( const char *name )
 			for ( pos = 0; ( pos = ini_next( sect[s], keys[k], pos, &v ) ) >= 0; )
 				if ( ( t = cond( v ) ) != NULL && contains( t, var ) )
 					return 1;
+	for ( pos = 0; ( pos = ini_next( "HexPatch", "Patch", pos, &v ) ) >= 0; )
+		if ( ( t = cond( v ) ) != NULL && contains( t, var ) )
+			return 1;
 	return 0;
 }
 
@@ -1187,6 +1297,7 @@ static void remove_all( void )
 	for ( pos = 0; pos < MAXOPT; pos++ )
 		opt_on[pos] = 1;
 	find_windows();
+	patch_all();
 	edit_all();
 	path_cat( p, dest, "INSTALL.LOG" );
 	if ( ( logf = fopen( p, "r" ) ) != NULL ) {
@@ -1327,6 +1438,7 @@ static void install_steps( void )
 	scr_desktop();
 	run_all( "Before" );
 	copy_all();
+	patch_all();
 	edit_all();
 	run_all( "After" );
 }

@@ -12,6 +12,7 @@ It does the following:
 - asks for the target directory and options,
 - copies the files,
 - adds or removes lines in `CONFIG.SYS` and `AUTOEXEC.BAT`, and in the `SYSTEM.INI` of Windows 3.x, keeping backups,
+- applies checked binary patches by byte signature, without relying on version-specific offsets,
 - removes the installation again (`INSTALL /U`),
 - takes the files from compressed archives on several disks (GDA, deflate) and asks for the disks,
 - finds programs that are already installed (`[Find]`, e.g. MSCDEX or SHSUCDX),
@@ -95,6 +96,10 @@ Replace=yes                     ; write a new file (the old one is kept as backu
 Remove=EUSBVXD.386
 Add=2|386Enh|device=%DIR%\EUSBVXD.386   ; section|line
 
+[HexPatch]                     ; file|old bytes|new bytes|exact matches
+Patch=%WINDIR%\SYSTEM\WIN386.EXE|66 C7 46 49 FF FF|6A FF 8F 46 49 90|2
+Patch=1|%DIR%\PROGRAM.EXE|7503|EB03|1   ; optional condition
+
 [Text]                          ; optional: translate the texts of the installer
 WelcomeTitle=Willkommen
 Accept=Akzeptieren
@@ -113,6 +118,8 @@ can still change the choice. `Option=!?NAME|...` inverts the initial state.
 `?NAME` and `!?NAME` are also available in normal conditions. Relative
 program names are loaded next to `INSTALL.EXE`; `%BOOT%`, `%WINDIR%`, `%SRC%`
 and `[Find]` variables are expanded in the command line.
+
+**Binary patches:** `[HexPatch]` accepts hexadecimal byte pairs separated by spaces, commas, hyphens, or nothing. The old and new signatures must have the same length (up to 32 bytes), and the last field is the exact number of expected matches. Setup refuses an unknown or ambiguous file, writes the changed file through a temporary file, and keeps the original as `.G01`, `.G02`, and so on. Re-running Setup recognizes an already patched file. `INSTALL /U` applies the checked reverse transformation. The WIN386 example is the Windows 3.1/3.11 FAT32 compatibility patch; distributors should enable it only for an appropriate DOS/Windows combination.
 
 **Variables:**
 
@@ -189,11 +196,13 @@ Open Watcom 2.0 (`WATCOM=/opt/watcom`), GNU make:
 
     make            -> build/INSTALL.EXE (combined DOS MZ + Win16 NE)
 
-**Tests:** `test/run.sh` boots DOS in QEMU and runs a test installation with the keys sent through the QEMU monitor, then shows the changed files.
+**Tests:** `make test-host` checks the portable binary-patch engine. `test/run.sh` boots DOS in QEMU and runs a test installation with the keys sent through the QEMU monitor, then shows the changed files.
 
 | Command | Test |
 |---|---|
+| `make test-host` | byte parsing, exact-match validation, backup, repeat and reverse patch |
 | `test/run.sh` | installation |
+| `WINDOWS=1 HEXPATCH=1 INI=test/TESTHEX.INI test/run.sh` | DOS binary-patch integration (add `TARGET=TESTHEX UNINST=1` for reverse) |
 | `UNINST=1 test/run.sh` | installation and `INSTALL /U` |
 | `MENU=1 WINDOWS=1 INI=test/TESTWIN.INI test/run.sh` | multi-configuration `CONFIG.SYS` and `SYSTEM.INI` |
 | `PKG=dir TARGET=NAME test/run.sh` | the distribution in `dir` (its `INSTALL.INI`), target `A:\NAME` |

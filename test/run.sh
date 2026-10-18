@@ -59,8 +59,15 @@ if [ -n "${WINDOWS:-}" ]; then   # a fake Windows directory with SYSTEM.INI
     sed -i 's/^A:\\SRC\\QEXIT/ECHO === SYSTEM.INI > AUX\r\nTYPE A:\\WINDOWS\\SYSTEM.INI > AUX\r\nA:\\SRC\\QEXIT/' "$OUT/src/RUN.BAT"
     mcopy -o -i "$P" "$OUT/src/RUN.BAT" ::/SRC/
 fi
-KEYS=${KEYS:-"ret ret ret ret ret ret ret"}
-[ -n "${UNINST:-}" ] && KEYS="$KEYS r ret"
+if [ -n "${HEXPATCH:-}" ]; then
+    mmd -i "$P" ::/WINDOWS/SYSTEM
+    printf '\x10\x66\xC7\x46\x49\xFF\xFF\x20\x66\xC7\x46\x49\xFF\xFF\x30' > "$OUT/WIN386.EXE"
+    mcopy -o -i "$P" "$OUT/WIN386.EXE" ::/WINDOWS/SYSTEM/
+fi
+DEFAULT_KEYS="ret ret ret ret ret ret ret"
+[ -n "${HEXPATCH:-}" ] && [ -n "${UNINST:-}" ] && DEFAULT_KEYS="ret ret ret ret ret ret"
+KEYS=${KEYS:-$DEFAULT_KEYS}
+[ -n "${UNINST:-}" ] && KEYS="$KEYS ${UNKEYS:-left ret}"
 {
     sleep ${START:-8}; n=0
     for k in $KEYS; do n=$((n+1)); echo "screendump $OUT/s$n.ppm"; sleep 1; echo "sendkey $k"; sleep 2; done
@@ -70,3 +77,13 @@ KEYS=${KEYS:-"ret ret ret ret ret ret ret"}
     -device isa-debug-exit,iobase=0x501,iosize=0x02 > "$OUT/monitor.log" 2>&1
 for f in "$OUT"/*.ppm; do [ -f "$f" ] && magick "$f" "${f%.ppm}.png" && rm -f "$f"; done
 tr -d '\r' < "$OUT/serial.log"
+if [ -n "${HEXPATCH:-}" ]; then
+    mcopy -o -i "$P" ::/WINDOWS/SYSTEM/WIN386.EXE "$OUT/PATCHED.EXE"
+    mcopy -o -i "$P" ::/WINDOWS/SYSTEM/WIN386.G01 "$OUT/ORIGINAL.EXE"
+    if [ -n "${UNINST:-}" ]; then
+        python3 -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]).read_bytes(); b=pathlib.Path(sys.argv[2]).read_bytes(); assert p.count(bytes.fromhex("66 C7 46 49 FF FF")) == 2; assert b == p' "$OUT/PATCHED.EXE" "$OUT/ORIGINAL.EXE" || exit 1
+    else
+        python3 -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]).read_bytes(); b=pathlib.Path(sys.argv[2]).read_bytes(); assert p.count(bytes.fromhex("6A FF 8F 46 49 90")) == 2; assert b.count(bytes.fromhex("66 C7 46 49 FF FF")) == 2' "$OUT/PATCHED.EXE" "$OUT/ORIGINAL.EXE" || exit 1
+    fi
+    echo "DOS hexpatch integration passed"
+fi
