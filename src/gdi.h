@@ -1,7 +1,7 @@
 /* gdi.h - GeosOne dual-mode installer
  * Copyright (C) 2026 GeosOne.  GNU General Public License version 3. */
 
-#define GDI_VERSION "1.5.0"
+#define GDI_VERSION "1.6.0"
 
 /* screen.c */
 void scr_init( void );

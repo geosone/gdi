@@ -18,8 +18,11 @@ Conditions and variables use the existing GDI rules. Supported roots are
 planned as `HKCR`, `HKCU`, `HKLM` and `HKU`; value types begin with `SZ`,
 `EXPAND_SZ`, `DWORD` and `BINARY`.
 
-This section is currently reserved and is not executed. Activation requires
-one transaction implementation that does all of the following:
+This section is currently reserved and is not executed. The dual-mode frontend
+now waits for an explicit completion status from its DOS engine, so registry
+work can be ordered after a successful file/configuration transaction. Full
+activation still requires one transaction implementation that does all of the
+following:
 
 - records whether every key/value existed and saves its exact old type/data;
 - writes that record to the installation log before changing the registry;

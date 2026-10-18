@@ -30,6 +30,7 @@ static int engine_running;
 static char source_dir[128];
 static char module_path[128];
 static char engine_path[128];
+static char completion_path[128];
 static char setup_title[80];
 static char product[100];
 static char welcome_text[1000];
@@ -57,6 +58,22 @@ static int delete_file( const char *path )
     OFSTRUCT of;
     OpenFile( path, &of, OF_DELETE );
     return !file_exists( path );
+}
+
+/* -1 = not complete yet; 0 = success; 1 = cancelled; 2 = failed. */
+static int read_completion( void )
+{
+    OFSTRUCT of;
+    HFILE file;
+    char status;
+
+    file = OpenFile( completion_path, &of, OF_READ | OF_SHARE_DENY_WRITE );
+    if ( file == HFILE_ERROR )
+        return -1;
+    if ( _lread( file, &status, 1 ) != 1 )
+        status = 0;
+    _lclose( file );
+    return status >= '0' && status <= '2' ? status - '0' : -1;
 }
 
 /* Write the MZ part before the NE header to a temporary executable. */
@@ -124,9 +141,16 @@ static int extract_dos_engine( void )
             strcpy( dot, ".EXE" );
         else
             strcat( engine_path, ".EXE" );
-        if ( !file_exists( engine_path ) )
+        strcpy( completion_path, engine_path );
+        dot = strrchr( completion_path, '.' );
+        if ( dot )
+            strcpy( dot, ".STS" );
+        else
+            strcat( completion_path, ".STS" );
+        if ( !file_exists( engine_path ) && !file_exists( completion_path ) )
             break;
         engine_path[0] = 0;
+        completion_path[0] = 0;
     }
     if ( !*engine_path ) {
         _lclose( input );
@@ -136,6 +160,7 @@ static int extract_dos_engine( void )
     if ( output == HFILE_ERROR ) {
         _lclose( input );
         engine_path[0] = 0;
+        completion_path[0] = 0;
         return 0;
     }
     if ( _lwrite( output, buffer, (UINT)header_size ) != (UINT)header_size ||
@@ -155,6 +180,7 @@ static int extract_dos_engine( void )
     if ( left != 0 ) {
         delete_file( engine_path );
         engine_path[0] = 0;
+        completion_path[0] = 0;
         return 0;
     }
     return 1;
@@ -216,9 +242,11 @@ static HWND make_control( HWND parent, const char *class_name, const char *text,
 
 static void start_dos_setup( HWND window )
 {
-    char ini_path[128], command[300], bits[MAXOPT + 1];
+    char ini_path[128], command[400], bits[MAXOPT + 1];
     int i;
     UINT result;
+    if ( engine_running )
+        return;
     if ( !extract_dos_engine() ) {
         MessageBox( window, "The embedded DOS installation engine could not be extracted.",
                     setup_title, MB_OK | MB_ICONEXCLAMATION );
@@ -230,13 +258,14 @@ static void start_dos_setup( HWND window )
     }
     bits[option_count] = 0;
     path_cat( ini_path, source_dir, "INSTALL.INI" );
-    wsprintf( command, "%s /O:%s %s", (LPSTR)engine_path,
-              (LPSTR)bits, (LPSTR)ini_path );
+    wsprintf( command, "%s /O:%s /W:%s %s", (LPSTR)engine_path,
+              (LPSTR)bits, (LPSTR)completion_path, (LPSTR)ini_path );
     result = WinExec( command, SW_SHOWNORMAL );
     if ( result <= 32 ) {
         char error[120];
         delete_file( engine_path );
         engine_path[0] = 0;
+        completion_path[0] = 0;
         wsprintf( error,
                   "Windows could not start the DOS installation engine (error %u).",
                   result );
@@ -251,7 +280,7 @@ static void start_dos_setup( HWND window )
 static long FAR PASCAL window_proc( HWND window, UINT message,
                                     WPARAM wparam, LPARAM lparam )
 {
-    int i, rows, group_height, button_y;
+    int i, rows, group_height, button_y, status;
     (void)lparam;
     switch ( message ) {
     case WM_CREATE:
@@ -301,11 +330,15 @@ static long FAR PASCAL window_proc( HWND window, UINT message,
         }
         break;
     case WM_TIMER:
-        /* The executable is fully loaded before WinExec returns. Keep trying
-         * until Windows releases it, then close the minimized frontend. */
-        if ( engine_running && delete_file( engine_path ) ) {
-            engine_running = 0;
+        /* Remove the extracted image once Windows releases it, but keep this
+         * task alive until the DOS engine reports its final status. */
+        if ( engine_running && *engine_path && delete_file( engine_path ) )
             engine_path[0] = 0;
+        status = engine_running ? read_completion() : -1;
+        if ( status >= 0 ) {
+            engine_running = 0;
+            delete_file( completion_path );
+            completion_path[0] = 0;
             KillTimer( window, 1 );
             DestroyWindow( window );
         }
@@ -313,6 +346,8 @@ static long FAR PASCAL window_proc( HWND window, UINT message,
     case WM_DESTROY:
         if ( *engine_path )
             delete_file( engine_path );
+        if ( *completion_path )
+            delete_file( completion_path );
         PostQuitMessage( 0 );
         return 0;
     }

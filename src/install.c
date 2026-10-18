@@ -48,6 +48,9 @@ static struct {
 static int ndetect;
 static FILE *logf;
 static const char *gdi_self;           /* argv[0] */
+static char completion_file[80];       /* /W:path: Win16 completion status */
+static int completion_status = 2;
+static int completion_registered;
 static jmp_buf extra_abort;            /* an extra installation was cancelled */
 static int in_extra;                   /* INSTALL.LOG: installed files */
 
@@ -62,6 +65,17 @@ static const char *T( const char *key, const char *def )
 		memmove( p + 1, p + 2, strlen( p + 2 ) + 1 );
 	}
 	return v;
+}
+
+static void write_completion( void )
+{
+	FILE *f;
+	if ( !*completion_file )
+		return;
+	if ( ( f = fopen( completion_file, "w" ) ) != NULL ) {
+		fprintf( f, "%d\n", completion_status );
+		fclose( f );
+	}
 }
 
 /* --- helpers -------------------------------------------------------- */
@@ -227,6 +241,7 @@ static void fail( const char *text )
 	scr_message( T( "ErrorTitle", "Error" ), text, ok, 1, 0, 1 );
 	if ( in_extra )
 		longjmp( extra_abort, 2 );
+	completion_status = 2;
 	scr_exit();
 	exit( 2 );
 }
@@ -237,6 +252,7 @@ static void abort_setup( void )
 	scr_message( T( "AbortTitle", "Setup" ), T( "Aborted", "Setup was cancelled. Nothing was changed." ), ok, 1, 0, 0 );
 	if ( in_extra )
 		longjmp( extra_abort, 1 );
+	completion_status = 1;
 	scr_exit();
 	exit( 1 );
 }
@@ -1545,12 +1561,13 @@ static void finish( void )
 static void usage( void )
 {
 	printf( "GeosOne DOS Installer " GDI_VERSION " - GNU GPL version 3\n"
-	        "INSTALL [/U] [/B:d:] [/O:bits] [file.INI]\n"
+	        "INSTALL [/U] [/B:d:] [/O:bits] [/W:status] [file.INI]\n"
 	        "  installs as described by INSTALL.INI next to INSTALL.EXE\n"
 	        "  /U    removes the installation (run INSTALL.EXE in the target directory)\n"
 	        "  /B:d: drive of the system to change (CONFIG.SYS, AUTOEXEC.BAT),\n"
 	        "        default: the boot drive\n"
-	        "  /O:   initial option states, e.g. /O:1010 (used by Windows setup)\n" );
+	        "  /O:   initial option states, e.g. /O:1010 (used by Windows setup)\n"
+	        "  /W:   write completion status for the Windows setup frontend\n" );
 }
 
 int main( int argc, char **argv )
@@ -1575,6 +1592,12 @@ int main( int argc, char **argv )
 				bootset = 1;
 			} else if ( toupper( argv[i][1] ) == 'O' && argv[i][2] == ':' ) {
 				option_override = argv[i] + 3;
+			} else if ( toupper( argv[i][1] ) == 'W' && argv[i][2] == ':' && argv[i][3] ) {
+				sprintf( completion_file, "%.79s", argv[i] + 3 );
+				if ( !completion_registered ) {
+					atexit( write_completion );
+					completion_registered = 1;
+				}
 			} else {
 				usage();
 				return 0;
@@ -1640,6 +1663,7 @@ int main( int argc, char **argv )
 	}
 	scr_desktop();
 	finish();
+	completion_status = 0;
 	scr_exit();
 	return 0;
 }

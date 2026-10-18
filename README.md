@@ -153,8 +153,11 @@ Explicit on/off choices are passed through `/O:`. The current frontend extracts
 the embedded MZ installer to the Windows temporary directory, starts it for
 license display, copying and transactional edits, and removes the temporary
 file again. Only the combined `INSTALL.EXE` is distributed or copied for
-uninstall. Moving those remaining engine steps into native Win16 code is the
-next stage; the INI format stays shared.
+uninstall. An internal `/W:` completion-status file keeps the Win16 task alive
+until the DOS transaction has succeeded, failed or been cancelled; this is the
+ordering foundation for later registry transactions. Moving the remaining
+engine steps into native Win16 code is the next stage; the INI format stays
+shared.
 
 Registry editing is designed as a native-engine feature, not as OpenASPI
 special handling. The draft transaction format and the different Windows 3.1
