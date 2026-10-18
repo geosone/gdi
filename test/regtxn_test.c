@@ -11,9 +11,10 @@ static int failures;
 static void parser_tests( void )
 {
     struct gdi_reg_entry entry;
+    struct gdi_reg_entry roundtrip;
     unsigned char data[GDI_REG_DATA_MAX];
     unsigned size;
-    char error[100];
+    char error[100], line[1100];
 
     CHECK( !gdi_reg_parse( "Set",
         "1,!2,?TAPE|HKLM|Software\\GeosOne\\OpenASPI|Enabled|DWORD|0x12345678",
@@ -26,6 +27,14 @@ static void parser_tests( void )
     CHECK( !gdi_reg_make_data( &entry, data, &size, error, sizeof(error) ) );
     CHECK( size == 4 && data[0] == 0x78 && data[1] == 0x56 &&
            data[2] == 0x34 && data[3] == 0x12 );
+    CHECK( !gdi_reg_format( &entry, line, sizeof(line) ) );
+    CHECK( !gdi_reg_parse_line( line, &roundtrip, error, sizeof(error) ) );
+    CHECK( roundtrip.operation == entry.operation &&
+           roundtrip.root == entry.root && roundtrip.type == entry.type &&
+           !strcmp( roundtrip.condition, entry.condition ) &&
+           !strcmp( roundtrip.key, entry.key ) &&
+           !strcmp( roundtrip.name, entry.name ) &&
+           !strcmp( roundtrip.text, entry.text ) );
 
     CHECK( !gdi_reg_parse( "Set", "|HKCR|Tape\\shell\\open|@|SZ|Open tape",
                            &entry, error, sizeof(error) ) );
@@ -57,6 +66,12 @@ static void parser_tests( void )
                           error, sizeof(error) ) != 0 );
     CHECK( gdi_reg_parse( "DeleteKey", "|HKLM|Key|extra", &entry,
                           error, sizeof(error) ) != 0 );
+    CHECK( gdi_reg_parse_line( "Bogus=|HKLM|Key", &entry,
+                               error, sizeof(error) ) != 0 );
+    CHECK( gdi_reg_parse_line( "Set without equals", &entry,
+                               error, sizeof(error) ) != 0 );
+    CHECK( gdi_reg_parse_line( "Set=|HKCR|Bad\\\\Key|@|SZ|x", &entry,
+                               error, sizeof(error) ) != 0 );
 }
 
 static void journal_tests( void )

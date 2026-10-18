@@ -22,6 +22,7 @@
 #include <setjmp.h>
 #include "gdi.h"
 #include "hexpatch.h"
+#include "regtxn.h"
 
 #define MAXOPT   16
 #define MAXLINE  600
@@ -33,7 +34,7 @@ static char opt_on[MAXOPT];
 static const char *opt_label[MAXOPT];
 static char opt_value[MAXOPT][24];   /* %On%: value when option n is on */
 static int nopt;
-static int uninstall, dosmode, bootset;
+static int uninstall, keep_uninstaller, dosmode, bootset;
 static const char *option_override;     /* /O:0101 from the Win16 frontend */
 static struct {
 	char name[16];
@@ -49,6 +50,8 @@ static int ndetect;
 static FILE *logf;
 static const char *gdi_self;           /* argv[0] */
 static char completion_file[80];       /* /W:path: Win16 completion status */
+static char registry_plan_file[80];    /* /R:path: expanded native plan */
+static int registry_family;            /* /F:31 or /F:9X */
 static int completion_status = 2;
 static int completion_registered;
 static jmp_buf extra_abort;            /* an extra installation was cancelled */
@@ -94,7 +97,7 @@ static int file_exists( const char *p )
 }
 
 /* %DIR%, %WINDIR%, %BOOT%, %SRC% */
-static void expand( char *out, const char *in, int max )
+static int expand( char *out, const char *in, int max )
 {
 	int o = 0;
 	while ( *in && o < max - 1 ) {
@@ -132,6 +135,7 @@ static void expand( char *out, const char *in, int max )
 			out[o++] = *in++;
 	}
 	out[o] = 0;
+	return *in != 0;
 }
 
 static const char *find_path( const char *name, int n )
@@ -188,6 +192,137 @@ static const char *cond( const char *v )
 			return NULL;
 	}
 	return bar + 1;
+}
+
+static int condition_true( const char *condition )
+{
+	char value[GDI_REG_CONDITION_MAX + 3];
+	const char *result;
+	if ( !*condition )
+		return 1;
+	sprintf( value, "%s|x", condition );
+	result = cond( value );
+	return result != NULL && !strcmp( result, "x" );
+}
+
+/* Validate every line, including inactive entries.  This is run before the
+ * installer UI can change package files; the final expanded data is checked
+ * again while the native plan is written. */
+static int registry_preflight( char *message )
+{
+	const char *line;
+	int pos = 0, number = 0;
+	while ( ( pos = ini_lines( "Registry", pos, &line ) ) >= 0 ) {
+		struct gdi_reg_entry entry;
+		char error[100];
+		unsigned char data[GDI_REG_DATA_MAX];
+		unsigned data_size;
+		number++;
+		if ( gdi_reg_parse_line( line, &entry, error, sizeof(error) ) ||
+		     ( entry.operation == GDI_REG_SET && !strchr( entry.text, '%' ) &&
+		       gdi_reg_make_data( &entry, data, &data_size,
+		                          error, sizeof(error) ) ) ) {
+			sprintf( message, "Registry line %d: %.90s", number, error );
+			return -1;
+		}
+	}
+	return 0;
+}
+
+/* Write only active, expanded entries.  This makes the Windows backend a
+ * simple executor: option, detector and path semantics remain owned by the
+ * common DOS engine and cannot diverge between Windows families. */
+static int registry_write_plan( char *message )
+{
+	const char *line;
+	FILE *file;
+	int pos = 0, number = 0;
+	char journal[80], error[100];
+	if ( !*registry_plan_file )
+		return 0;
+	if ( in_extra ) {
+		if ( ini_lines( "Registry", 0, &line ) >= 0 ) {
+			strcpy( message,
+			        "Registry entries in an Extras package are not supported yet" );
+			return -1;
+		}
+		return 0;
+	}
+	if ( !( file = fopen( registry_plan_file, "w" ) ) ) {
+		sprintf( message, "Cannot create registry plan: %.60s", registry_plan_file );
+		return -1;
+	}
+	path_cat( journal, dest, "REGISTRY.LOG" );
+	fprintf( file, "GDI-REGISTRY-PLAN 1\nJournal=%s\n", journal );
+	while ( ( pos = ini_lines( "Registry", pos, &line ) ) >= 0 ) {
+		struct gdi_reg_entry entry;
+		char expanded[GDI_REG_TEXT_MAX + 1], output[1100];
+		unsigned char data[GDI_REG_DATA_MAX];
+		unsigned data_size;
+		number++;
+		if ( gdi_reg_parse_line( line, &entry, error, sizeof(error) ) )
+			goto invalid;
+		if ( !condition_true( entry.condition ) )
+			continue;
+		if ( registry_family == 9 ) {
+			strcpy( error, "Windows 9x registry backend is not available yet" );
+			goto invalid;
+		}
+		if ( gdi_reg_validate_family( &entry, registry_family == 9,
+		                              error, sizeof(error) ) )
+			goto invalid;
+		entry.condition[0] = 0;
+		if ( expand( expanded, entry.key, sizeof(expanded) ) ) {
+			strcpy( error, "expanded registry key is too long" );
+			goto invalid;
+		}
+		if ( strlen( expanded ) > GDI_REG_KEY_MAX ) {
+			strcpy( error, "expanded registry key is too long" );
+			goto invalid;
+		}
+		strcpy( entry.key, expanded );
+		if ( entry.operation != GDI_REG_DELETE_KEY ) {
+			if ( expand( expanded, entry.name, sizeof(expanded) ) ) {
+				strcpy( error, "expanded registry value name is too long" );
+				goto invalid;
+			}
+			if ( strlen( expanded ) > GDI_REG_NAME_MAX ) {
+				strcpy( error, "expanded registry value name is too long" );
+				goto invalid;
+			}
+			strcpy( entry.name, expanded );
+		}
+		if ( entry.operation == GDI_REG_SET ) {
+			if ( expand( expanded, entry.text, sizeof(expanded) ) ) {
+				strcpy( error, "expanded registry data is too long" );
+				goto invalid;
+			}
+			strcpy( entry.text, expanded );
+			if ( gdi_reg_make_data( &entry, data, &data_size,
+			                        error, sizeof(error) ) )
+				goto invalid;
+		}
+		if ( gdi_reg_format( &entry, output, sizeof(output) ) ) {
+			strcpy( error, "expanded registry entry cannot be represented" );
+			goto invalid;
+		}
+		if ( fprintf( file, "%s\n", output ) < 0 ) {
+			strcpy( error, "cannot write registry plan" );
+			goto invalid;
+		}
+	}
+	if ( fclose( file ) ) {
+		remove( registry_plan_file );
+		strcpy( message, "Cannot finish registry plan" );
+		return -1;
+	}
+	return 0;
+
+invalid:
+	fclose( file );
+	remove( registry_plan_file );
+	sprintf( message, "Registry line %d: %.90s", number, error );
+	return -1;
 }
 
 static int contains( const char *s, const char *pat )
@@ -1429,11 +1564,13 @@ static void remove_all( void )
 			path_cat( p, dest, name );
 		remove( p );
 	}
-	path_cat( p, dest, "INSTALL.INI" );
-	remove( p );
-	path_cat( p, dest, "INSTALL.EXE" );
-	remove( p );
-	rmdir( dest );
+	if ( !keep_uninstaller ) {
+		path_cat( p, dest, "INSTALL.INI" );
+		remove( p );
+		path_cat( p, dest, "INSTALL.EXE" );
+		remove( p );
+		rmdir( dest );
+	}
 }
 
 /* --- DOS mode ----------------------------------------------------------- */
@@ -1523,6 +1660,7 @@ static void license( void );
 /* the setup steps of an INI (not DOS mode) */
 static void install_steps( void )
 {
+	char registry_error[130];
 	welcome();
 	license();
 	scr_desktop();
@@ -1530,6 +1668,8 @@ static void install_steps( void )
 	scr_desktop();
 	ask_options();
 	scr_desktop();
+	if ( registry_write_plan( registry_error ) )
+		fail( registry_error );
 	if ( !confirm() )
 		abort_setup();
 	scr_desktop();
@@ -1648,7 +1788,10 @@ static void usage( void )
 	        "  /B:d: drive of the system to change (CONFIG.SYS, AUTOEXEC.BAT),\n"
 	        "        default: the boot drive\n"
 	        "  /O:   initial option states, e.g. /O:1010 (used by Windows setup)\n"
-	        "  /W:   write completion status for the Windows setup frontend\n" );
+	        "  /W:   write completion status for the Windows setup frontend\n"
+	        "  /R:   write its expanded registry plan (internal)\n"
+	        "  /F:   registry family: 31 or 9X (internal)\n"
+	        "  /K    keep the uninstaller until native cleanup (internal)\n" );
 }
 
 int main( int argc, char **argv )
@@ -1668,6 +1811,8 @@ int main( int argc, char **argv )
 		if ( argv[i][0] == '/' || argv[i][0] == '-' ) {
 			if ( toupper( argv[i][1] ) == 'U' )
 				uninstall = 1;
+			else if ( toupper( argv[i][1] ) == 'K' && !argv[i][2] )
+				keep_uninstaller = 1;
 			else if ( toupper( argv[i][1] ) == 'B' && argv[i][2] == ':' && isalpha( argv[i][3] ) ) {
 				boot[0] = toupper( argv[i][3] );
 				bootset = 1;
@@ -1678,6 +1823,17 @@ int main( int argc, char **argv )
 				if ( !completion_registered ) {
 					atexit( write_completion );
 					completion_registered = 1;
+				}
+			} else if ( toupper( argv[i][1] ) == 'R' && argv[i][2] == ':' && argv[i][3] ) {
+				sprintf( registry_plan_file, "%.79s", argv[i] + 3 );
+			} else if ( toupper( argv[i][1] ) == 'F' && argv[i][2] == ':' ) {
+				if ( !stricmp( argv[i] + 3, "31" ) )
+					registry_family = 3;
+				else if ( !stricmp( argv[i] + 3, "9X" ) )
+					registry_family = 9;
+				else {
+					usage();
+					return 2;
 				}
 			} else {
 				usage();
@@ -1698,6 +1854,17 @@ int main( int argc, char **argv )
 	if ( ini_load( ini ) ) {
 		printf( "INSTALL: %s not found\n", ini );
 		return 2;
+	}
+	if ( *registry_plan_file ) {
+		char registry_error[130];
+		if ( !registry_family ) {
+			printf( "INSTALL: /R requires /F:31 or /F:9X\n" );
+			return 2;
+		}
+		if ( registry_preflight( registry_error ) ) {
+			printf( "INSTALL: %s\n", registry_error );
+			return 2;
+		}
 	}
 	dosmode = !stricmp( ini_get( "Setup", "Mode", "" ), "DOS" );
 	if ( dosmode && !bootset ) {

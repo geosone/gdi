@@ -61,6 +61,10 @@ struct gdi_reg_record {
 int gdi_reg_parse( const char *verb, const char *value,
                    struct gdi_reg_entry *entry, char *error,
                    size_t error_size );
+int gdi_reg_parse_line( const char *line, struct gdi_reg_entry *entry,
+                        char *error, size_t error_size );
+int gdi_reg_format( const struct gdi_reg_entry *entry, char *line,
+                    size_t line_size );
 int gdi_reg_validate_family( const struct gdi_reg_entry *entry, int win9x,
                              char *error, size_t error_size );
 int gdi_reg_make_data( const struct gdi_reg_entry *entry, unsigned char *data,

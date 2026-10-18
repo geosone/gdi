@@ -12,8 +12,8 @@ LINK := $(WATCOM)/binl/wlink
 COPT := -q -bt=dos -ms -0 -os -s -zq -wx -I$(WATCOM)/h
 WCOPT := -q -bt=windows -ms -0 -zW -os -s -zq -w4 -we -I$(WATCOM)/h -I$(WATCOM)/h/win
 
-OBJS := $(addprefix $(OUT)/,install.obj screen.obj ini.obj archive.obj hexpatch.obj)
-WINOBJS := $(OUT)/wininstall.obj $(OUT)/winini.obj $(OUT)/winregtxn.obj
+OBJS := $(addprefix $(OUT)/,install.obj screen.obj ini.obj archive.obj hexpatch.obj regtxn.obj)
+WINOBJS := $(OUT)/wininstall.obj $(OUT)/winini.obj $(OUT)/winregtxn.obj $(OUT)/winreg16.obj
 DOSIMAGE := $(OUT)/INSTALL.STB
 DOSPACKED := $(OUT)/INSTALL.PST
 WINIMAGE := $(OUT)/INSTALL.UNP
@@ -54,10 +54,13 @@ $(OUT)/winini.obj: src/ini.c src/gdi.h | $(OUT)
 $(OUT)/winregtxn.obj: src/regtxn.c src/regtxn.h | $(OUT)
 	$(CC) $(WCOPT) -fo=$@ $<
 
+$(OUT)/winreg16.obj: src/winreg16.c src/winreg16.h src/regtxn.h | $(OUT)
+	$(CC) $(WCOPT) -fo=$@ $<
+
 $(WINIMAGE): $(DOSPACKED) $(WINOBJS)
 	$(LINK) option quiet format windows name $@ option map=$(OUT)/INSTALLW.map \
 	  $(foreach o,$(WINOBJS),file $(o)) libpath $(WATCOM)/lib286/win \
-	  libpath $(WATCOM)/lib286 library windows,clibs \
+	  libpath $(WATCOM)/lib286 library windows,shell,clibs \
 	  option stack=8k,heapsize=4k,version=3.10 option stub=$(DOSPACKED)
 
 $(OUT)/INSTALL.EXE: $(WINIMAGE) upx

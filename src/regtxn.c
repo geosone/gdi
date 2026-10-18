@@ -129,6 +129,16 @@ static int parse_type( const char *text )
     return 0;
 }
 
+static const char *operation_name( int operation )
+{
+    switch ( operation ) {
+    case GDI_REG_SET:          return "Set";
+    case GDI_REG_DELETE_VALUE: return "DeleteValue";
+    case GDI_REG_DELETE_KEY:   return "DeleteKey";
+    }
+    return NULL;
+}
+
 const char *gdi_reg_root_name( int root )
 {
     switch ( root ) {
@@ -198,6 +208,11 @@ int gdi_reg_parse( const char *verb, const char *value,
         set_error( error, error_size, "registry key is empty" );
         return -1;
     }
+    if ( field[2][0] == '\\' || field[2][strlen( field[2] ) - 1] == '\\' ||
+         strstr( field[2], "\\\\" ) != NULL ) {
+        set_error( error, error_size, "registry key path is malformed" );
+        return -1;
+    }
     if ( copy_field( entry->key, sizeof(entry->key), field[2],
                      "registry key", error, error_size ) )
         return -1;
@@ -217,6 +232,68 @@ int gdi_reg_parse( const char *verb, const char *value,
                          "registry data", error, error_size ) )
             return -1;
     }
+    return 0;
+}
+
+int gdi_reg_parse_line( const char *line, struct gdi_reg_entry *entry,
+                        char *error, size_t error_size )
+{
+    char copy[1100], *equals, *verb, *value;
+    if ( strlen( line ) >= sizeof(copy) ) {
+        set_error( error, error_size, "registry entry is too long" );
+        return -1;
+    }
+    strcpy( copy, line );
+    equals = strchr( copy, '=' );
+    if ( !equals ) {
+        set_error( error, error_size, "registry entry has no '='" );
+        return -1;
+    }
+    *equals = 0;
+    verb = trim( copy );
+    value = trim( equals + 1 );
+    if ( !*verb ) {
+        set_error( error, error_size, "registry operation is empty" );
+        return -1;
+    }
+    return gdi_reg_parse( verb, value, entry, error, error_size );
+}
+
+static int has_separator( const char *text )
+{
+    return strchr( text, '|' ) != NULL || strchr( text, '\r' ) != NULL ||
+           strchr( text, '\n' ) != NULL;
+}
+
+int gdi_reg_format( const struct gdi_reg_entry *entry, char *line,
+                    size_t line_size )
+{
+    char formatted[1100];
+    const char *operation = operation_name( entry->operation );
+    const char *root = gdi_reg_root_name( entry->root );
+    const char *type = gdi_reg_type_name( entry->type );
+    const char *name = entry->name[0] ? entry->name : "@";
+    int length;
+    if ( !operation || !root || has_separator( entry->condition ) ||
+         has_separator( entry->key ) || has_separator( entry->name ) ||
+         has_separator( entry->text ) )
+        return -1;
+    if ( entry->operation == GDI_REG_SET ) {
+        if ( !type || entry->type == GDI_REG_NONE )
+            return -1;
+        length = sprintf( formatted, "%s=%s|%s|%s|%s|%s|%s", operation,
+                          entry->condition, root, entry->key, name, type,
+                          entry->text );
+    } else if ( entry->operation == GDI_REG_DELETE_VALUE ) {
+        length = sprintf( formatted, "%s=%s|%s|%s|%s", operation,
+                          entry->condition, root, entry->key, name );
+    } else {
+        length = sprintf( formatted, "%s=%s|%s|%s", operation,
+                          entry->condition, root, entry->key );
+    }
+    if ( length < 0 || (size_t)length >= line_size )
+        return -1;
+    strcpy( line, formatted );
     return 0;
 }
 

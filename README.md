@@ -165,18 +165,18 @@ the embedded MZ installer to the Windows temporary directory, starts it for
 license display, copying and transactional edits, and removes the temporary
 file again. Only the combined `INSTALL.EXE` is distributed or copied for
 uninstall. An internal `/W:` completion-status file keeps the Win16 task alive
-until the DOS transaction has succeeded, failed or been cancelled; this is the
-ordering foundation for later registry transactions. Moving the remaining
-engine steps into native Win16 code is the next stage; the INI format stays
-shared.
+until the DOS transaction has succeeded, failed or been cancelled. On Windows
+3.x the native registry transaction then runs, or `/U` restores its journal
+before the Win16 frontend removes the retained uninstaller. The INI format
+stays shared.
 
-Registry editing is designed as a native-engine feature, not as OpenASPI
-special handling. The shared strict parser, typed-data converter and lossless
-journal record are implemented and tested; the transaction format and the
-different Windows 3.1 and Windows 9x capabilities are specified in
-[`docs/registry.md`](docs/registry.md). Registry mutation remains intentionally
-inactive until the platform backends implement backup, uninstall restoration
-and failure rollback together.
+Registry editing is a package-defined native-engine feature, not OpenASPI
+special handling. The DOS engine resolves conditions and variables into one
+validated native plan. The Windows 3.x `SHELL.DLL` backend applies `HKCR`
+default-string changes with a flushed, lossless rollback/uninstall journal.
+The Windows 9x backend is still disabled and rejects active registry entries
+before file copying. The format and family capabilities are specified in
+[`docs/registry.md`](docs/registry.md).
 
 **[Find]** looks first on the installation disk (next to `INSTALL.EXE`): a file found there is installed to `%DIR%` with the other files (only if an active line uses its `%NAME%`) and removed again by `INSTALL /U`. So a distributor can put e.g. `ASPICD.SYS`, `ASPIDISK.SYS` or `MKELS120.SYS` on the disk. Otherwise it searches the computer: `%BOOT%\DOS`, the `PATH`, the Windows directory and its `COMMAND`, `%BOOT%\` and the paths named in `CONFIG.SYS` and `AUTOEXEC.BAT`.
 
@@ -233,3 +233,8 @@ the Win16 NE portion into the final `INSTALL.EXE`. Intermediate files remain in
 | `UNINST=1 test/run.sh` | installation and `INSTALL /U` |
 | `MENU=1 WINDOWS=1 INI=test/TESTWIN.INI test/run.sh` | multi-configuration `CONFIG.SYS` and `SYSTEM.INI` |
 | `PKG=dir TARGET=NAME test/run.sh` | the distribution in `dir` (its `INSTALL.INI`), target `A:\NAME` |
+
+`test/registry` is the Windows 3.x VM fixture. It creates two temporary HKCR
+keys, verifies that a flushed `REGISTRY.LOG` is installed, then exercises the
+dual-mode `INSTALL.EXE /U`; successful restoration removes the journal,
+payload, uninstaller and destination directory.

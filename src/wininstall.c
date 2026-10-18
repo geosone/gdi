@@ -11,7 +11,10 @@
 #include <string.h>
 #include <ctype.h>
 #include <stdio.h>
+#include <direct.h>
 #include "gdi.h"
+#include "regtxn.h"
+#include "winreg16.h"
 
 #define MAXOPT       16
 #define ID_OPTION    100
@@ -28,11 +31,13 @@ static int has_automatic;
 static int win9x;
 static int engine_running;
 static char source_sidecar[128];
+static int uninstall_mode;
 static char source_dir[128];
 static char module_path[128];
 static char engine_path[128];
 static char completion_path[128];
 static char package_ini[128];
+static char registry_plan_path[128];
 static char setup_title[80];
 static char product[100];
 static char welcome_text[1000];
@@ -133,6 +138,24 @@ static int delete_file( const char *path )
     return !file_exists( path );
 }
 
+static void delete_uninstaller( void )
+{
+    char path[128], parent[128], *slash;
+    path_cat( path, source_dir, "INSTALL.INI" );
+    delete_file( path );
+    path_cat( path, source_dir, "INSTALL.EXE" );
+    delete_file( path );
+    strcpy( parent, source_dir );
+    slash = strrchr( parent, '\\' );
+    if ( slash == parent + 2 )
+        slash[1] = 0;
+    else if ( slash )
+        *slash = 0;
+    if ( slash )
+        chdir( parent );
+    rmdir( source_dir );
+}
+
 /* -1 = not complete yet; 0 = success; 1 = cancelled; 2 = failed. */
 static int read_completion( void )
 {
@@ -228,10 +251,18 @@ static int extract_dos_engine( void )
             strcpy( dot, ".STS" );
         else
             strcat( completion_path, ".STS" );
-        if ( !file_exists( engine_path ) && !file_exists( completion_path ) )
+        strcpy( registry_plan_path, engine_path );
+        dot = strrchr( registry_plan_path, '.' );
+        if ( dot )
+            strcpy( dot, ".REG" );
+        else
+            strcat( registry_plan_path, ".REG" );
+        if ( !file_exists( engine_path ) && !file_exists( completion_path ) &&
+             !file_exists( registry_plan_path ) )
             break;
         engine_path[0] = 0;
         completion_path[0] = 0;
+        registry_plan_path[0] = 0;
     }
     if ( !*engine_path ) {
         _lclose( input );
@@ -242,6 +273,7 @@ static int extract_dos_engine( void )
         _lclose( input );
         engine_path[0] = 0;
         completion_path[0] = 0;
+        registry_plan_path[0] = 0;
         return 0;
     }
     if ( _lwrite( output, buffer, (UINT)header_size ) != (UINT)header_size ||
@@ -262,6 +294,7 @@ static int extract_dos_engine( void )
         delete_file( engine_path );
         engine_path[0] = 0;
         completion_path[0] = 0;
+        registry_plan_path[0] = 0;
         return 0;
     }
     return 1;
@@ -288,6 +321,15 @@ static void read_package( void )
     if ( !*welcome_text )
         wsprintf( welcome_text, "This program installs %s.", (LPSTR)product );
 
+    if ( uninstall_mode ) {
+        sprintf( welcome_text, "%.999s",
+                 ini_get( "Text", "UninstText",
+                 "Remove the installation and restore its previous system settings?" ) );
+        option_count = 0;
+        has_automatic = 0;
+        return;
+    }
+
     option_count = 0;
     has_automatic = 0;
     pos = 0;
@@ -308,6 +350,28 @@ static void read_package( void )
         sprintf( option_label[option_count], "%.*s", length, bar );
         option_count++;
     }
+}
+
+static int registry_preflight( char *message )
+{
+    const char *line;
+    int pos = 0, number = 0;
+    while ( ( pos = ini_lines( "Registry", pos, &line ) ) >= 0 ) {
+        struct gdi_reg_entry entry;
+        unsigned char data[GDI_REG_DATA_MAX];
+        unsigned data_size;
+        char error[100];
+        number++;
+        if ( gdi_reg_parse_line( line, &entry, error, sizeof(error) ) ||
+             ( entry.operation == GDI_REG_SET && !strchr( entry.text, '%' ) &&
+               gdi_reg_make_data( &entry, data, &data_size,
+                                  error, sizeof(error) ) ) ) {
+            wsprintf( message, "Registry line %d: %.90s", number,
+                      (LPSTR)error );
+            return 0;
+        }
+    }
+    return 1;
 }
 
 static HWND make_control( HWND parent, const char *class_name, const char *text,
@@ -338,15 +402,23 @@ static void start_dos_setup( HWND window )
         bits[i] = state == 2 ? 'x' : state ? '1' : '0';
     }
     bits[option_count] = 0;
-    wsprintf( command, "\"%s\" /O:%s /W:\"%s\" \"%s\"",
-              (LPSTR)engine_path, (LPSTR)bits,
-              (LPSTR)completion_path, (LPSTR)package_ini );
+    if ( uninstall_mode )
+        wsprintf( command, "%s /U /K /W:\"%s\" \"%s\"",
+                  (LPSTR)engine_path, (LPSTR)completion_path,
+                  (LPSTR)package_ini );
+    else
+        wsprintf( command,
+                  "%s /O:%s /W:\"%s\" /R:\"%s\" /F:%s \"%s\"",
+                  (LPSTR)engine_path, (LPSTR)bits, (LPSTR)completion_path,
+                  (LPSTR)registry_plan_path, (LPSTR)( win9x ? "9X" : "31" ),
+                  (LPSTR)package_ini );
     result = WinExec( command, SW_SHOWNORMAL );
     if ( result <= 32 ) {
         char error[120];
         delete_file( engine_path );
         engine_path[0] = 0;
         completion_path[0] = 0;
+        registry_plan_path[0] = 0;
         wsprintf( error,
                   "Windows could not start the DOS installation engine (error %u).",
                   result );
@@ -392,6 +464,7 @@ static long FAR PASCAL window_proc( HWND window, UINT message,
         }
         button_y = 154 + group_height;
         install_window = make_control( window, "BUTTON",
+                      uninstall_mode ? ini_get( "Text", "Remove", "Remove" ) :
                       ini_get( "Text", "Install", "Start setup" ),
                       BS_DEFPUSHBUTTON | WS_TABSTOP, 350, button_y,
                       100, 26, ID_INSTALL );
@@ -417,9 +490,42 @@ static long FAR PASCAL window_proc( HWND window, UINT message,
             engine_path[0] = 0;
         status = engine_running ? read_completion() : -1;
         if ( status >= 0 ) {
+            char registry_error[180];
+            char journal_path[128];
             engine_running = 0;
             delete_file( completion_path );
             completion_path[0] = 0;
+            if ( status == 0 ) {
+                int registry_failed = 0;
+                if ( uninstall_mode ) {
+                    path_cat( journal_path, source_dir, "REGISTRY.LOG" );
+                    if ( file_exists( journal_path ) ) {
+                        if ( win9x ) {
+                            strcpy( registry_error,
+                                    "Windows 9x registry restore is not available yet." );
+                            registry_failed = 1;
+                        } else
+                            registry_failed = gdi_reg16_restore_journal(
+                                journal_path, registry_error,
+                                sizeof(registry_error) );
+                        if ( !registry_failed ) {
+                            delete_file( journal_path );
+                            delete_uninstaller();
+                        }
+                    }
+                    else
+                        delete_uninstaller();
+                } else if ( !win9x && *registry_plan_path )
+                    registry_failed = gdi_reg16_apply_plan(
+                        registry_plan_path, registry_error,
+                        sizeof(registry_error) );
+                if ( registry_failed )
+                    MessageBox( window, registry_error, setup_title,
+                                MB_OK | MB_ICONEXCLAMATION );
+            }
+            if ( *registry_plan_path )
+                delete_file( registry_plan_path );
+            registry_plan_path[0] = 0;
             KillTimer( window, 1 );
             DestroyWindow( window );
         }
@@ -429,6 +535,8 @@ static long FAR PASCAL window_proc( HWND window, UINT message,
             delete_file( engine_path );
         if ( *completion_path )
             delete_file( completion_path );
+        if ( *registry_plan_path )
+            delete_file( registry_plan_path );
         release_source_path();
         PostQuitMessage( 0 );
         return 0;
@@ -444,9 +552,19 @@ int PASCAL WinMain( HINSTANCE instance, HINSTANCE previous,
     HWND window;
     DWORD version;
     unsigned major, minor;
-    char module[128], *slash;
+    char module[128], registry_error[130], *slash;
     int rows, height, x, y;
 
+    {
+        LPSTR p = command_line;
+        while ( *p ) {
+            while ( *p == ' ' || *p == '\t' ) p++;
+            if ( ( *p == '/' || *p == '-' ) && toupper( p[1] ) == 'U' &&
+                 ( !p[2] || p[2] == ' ' || p[2] == '\t' ) )
+                uninstall_mode = 1;
+            while ( *p && *p != ' ' && *p != '\t' ) p++;
+        }
+    }
     app_instance = instance;
     GetModuleFileName( instance, module, sizeof(module) );
     strcpy( module_path, module );
@@ -481,6 +599,13 @@ int PASCAL WinMain( HINSTANCE instance, HINSTANCE previous,
               major, minor,
               (LPSTR)( win9x ? "Windows 9x/ME" : "Windows 3.x" ) );
     read_package();
+    if ( !registry_preflight( registry_error ) ) {
+        MessageBox( NULL, registry_error, setup_title,
+                    MB_OK | MB_ICONEXCLAMATION );
+        ini_free();
+        release_source_path();
+        return 2;
+    }
 
     if ( !previous ) {
         memset( &window_class, 0, sizeof(window_class) );
