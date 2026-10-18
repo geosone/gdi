@@ -20,6 +20,8 @@
 
 static HINSTANCE app_instance;
 static HWND option_window[MAXOPT];
+static HWND install_window;
+static HWND cancel_window;
 static HFONT ui_font;
 static int option_count;
 static int has_automatic;
@@ -53,7 +55,8 @@ static int file_exists( const char *path )
 static int delete_file( const char *path )
 {
     OFSTRUCT of;
-    return OpenFile( path, &of, OF_DELETE ) != HFILE_ERROR;
+    OpenFile( path, &of, OF_DELETE );
+    return !file_exists( path );
 }
 
 /* Write the MZ part before the NE header to a temporary executable. */
@@ -63,7 +66,8 @@ static int extract_dos_engine( void )
     HFILE input, output;
     BYTE header[64];
     static BYTE buffer[2048];
-    LONG file_size, stub_size, left;
+    LONG file_size, stub_size, left, header_size;
+    UINT reloc_count, reloc_offset, reloc_bytes;
     UINT want, got, unique;
     char *dot;
     int attempt;
@@ -80,12 +84,32 @@ static int extract_dos_engine( void )
                 ( (LONG)header[0x3d] << 8 ) |
                 ( (LONG)header[0x3e] << 16 ) |
                 ( (LONG)header[0x3f] << 24 );
-    file_size = _llseek( input, 0L, 2 );
-    if ( stub_size < (LONG)sizeof(header) || stub_size >= file_size ||
-         _llseek( input, 0L, 0 ) < 0 ) {
+    header_size = ( (UINT)header[8] | ( (UINT)header[9] << 8 ) ) * 16L;
+    reloc_count = (UINT)header[6] | ( (UINT)header[7] << 8 );
+    reloc_offset = (UINT)header[0x18] | ( (UINT)header[0x19] << 8 );
+    if ( reloc_count > ( sizeof(buffer) - 0x20 ) / 4 ) {
         _lclose( input );
         return 0;
     }
+    reloc_bytes = reloc_count * 4;
+    file_size = _llseek( input, 0L, 2 );
+    if ( stub_size < (LONG)sizeof(header) || stub_size >= file_size ||
+         header_size < (LONG)sizeof(header) ||
+         header_size > (LONG)sizeof(buffer) ||
+         reloc_offset + reloc_bytes > (UINT)header_size ||
+         0x20 + reloc_bytes > (UINT)header_size ||
+         _llseek( input, 0L, 0 ) < 0 ||
+         _lread( input, buffer, (UINT)header_size ) != (UINT)header_size ) {
+        _lclose( input );
+        return 0;
+    }
+
+    /* Wlink moves the DOS relocation table to 40h and stores the NE offset
+     * at 3Ch. Restore an old-style DOS header so Windows runs the extracted
+     * image as a DOS task rather than looking for an NE header after EOF. */
+    memmove( buffer + 0x20, buffer + reloc_offset, reloc_bytes );
+    buffer[0x18] = 0x20;
+    buffer[0x19] = 0;
 
     engine_path[0] = 0;
     unique = (UINT)GetTickCount();
@@ -114,7 +138,11 @@ static int extract_dos_engine( void )
         engine_path[0] = 0;
         return 0;
     }
-    left = stub_size;
+    if ( _lwrite( output, buffer, (UINT)header_size ) != (UINT)header_size ||
+         _llseek( input, header_size, 0 ) < 0 )
+        left = -1;
+    else
+        left = stub_size - header_size;
     while ( left > 0 ) {
         want = left > (LONG)sizeof(buffer) ? sizeof(buffer) : (UINT)left;
         got = _lread( input, buffer, want );
@@ -202,21 +230,21 @@ static void start_dos_setup( HWND window )
     }
     bits[option_count] = 0;
     path_cat( ini_path, source_dir, "INSTALL.INI" );
-    wsprintf( command, "\"%s\" /O:%s \"%s\"", (LPSTR)engine_path,
+    wsprintf( command, "%s /O:%s %s", (LPSTR)engine_path,
               (LPSTR)bits, (LPSTR)ini_path );
     result = WinExec( command, SW_SHOWNORMAL );
     if ( result <= 32 ) {
+        char error[120];
         delete_file( engine_path );
         engine_path[0] = 0;
-        MessageBox( window, "Windows could not start the DOS installation engine.",
-                    setup_title, MB_OK | MB_ICONEXCLAMATION );
+        wsprintf( error,
+                  "Windows could not start the DOS installation engine (error %u).",
+                  result );
+        MessageBox( window, error, setup_title, MB_OK | MB_ICONEXCLAMATION );
         return;
     }
     engine_running = 1;
     SetTimer( window, 1, 1000, NULL );
-    MessageBox( window,
-                "The installation engine has started. Complete setup in its DOS window.",
-                setup_title, MB_OK | MB_ICONINFORMATION );
     ShowWindow( window, SW_MINIMIZE );
 }
 
@@ -248,16 +276,19 @@ static long FAR PASCAL window_proc( HWND window, UINT message,
                                               ( option_on[i] == 2 ? BS_AUTO3STATE : BS_AUTOCHECKBOX ) |
                                               WS_TABSTOP,
                                               26 + column * 270, 166 + row * 22,
-                                              258, 20, ID_OPTION + i );
+                                              option_count > 8 ? 258 : 520,
+                                              20, ID_OPTION + i );
             SendMessage( option_window[i], BM_SETCHECK, option_on[i], 0L );
         }
         button_y = 154 + group_height;
-        make_control( window, "BUTTON", ini_get( "Text", "Install", "Start setup" ),
-                      BS_DEFPUSHBUTTON | WS_TABSTOP,
-                      350, button_y, 100, 26, ID_INSTALL );
-        make_control( window, "BUTTON", ini_get( "Text", "Cancel", "Cancel" ),
-                      BS_PUSHBUTTON | WS_TABSTOP,
-                      462, button_y, 90, 26, ID_CANCEL );
+        install_window = make_control( window, "BUTTON",
+                      ini_get( "Text", "Install", "Start setup" ),
+                      BS_DEFPUSHBUTTON | WS_TABSTOP, 350, button_y,
+                      100, 26, ID_INSTALL );
+        cancel_window = make_control( window, "BUTTON",
+                      ini_get( "Text", "Cancel", "Cancel" ),
+                      BS_PUSHBUTTON | WS_TABSTOP, 462, button_y,
+                      90, 26, ID_CANCEL );
         return 0;
     case WM_COMMAND:
         if ( wparam == ID_INSTALL ) {
@@ -321,7 +352,8 @@ int PASCAL WinMain( HINSTANCE instance, HINSTANCE previous,
     minor = HIBYTE( LOWORD( version ) );
     win9x = major >= 4 || ( major == 3 && minor >= 90 );
     wsprintf( environment_text, "Native Win16 setup - Windows %u.%02u (%s)",
-              major, minor, win9x ? "Windows 9x/ME" : "Windows 3.x" );
+              major, minor,
+              (LPSTR)( win9x ? "Windows 9x/ME" : "Windows 3.x" ) );
     read_package();
 
     if ( !previous ) {
@@ -352,7 +384,27 @@ int PASCAL WinMain( HINSTANCE instance, HINSTANCE previous,
     }
     ShowWindow( window, show );
     UpdateWindow( window );
+    SetFocus( install_window );
     while ( GetMessage( &message, NULL, 0, 0 ) ) {
+        if ( message.message == WM_KEYDOWN ) {
+            if ( message.wParam == VK_RETURN ) {
+                SendMessage( window, WM_COMMAND,
+                             GetFocus() == cancel_window ? ID_CANCEL : ID_INSTALL,
+                             0L );
+                continue;
+            }
+            if ( message.wParam == VK_ESCAPE ) {
+                SendMessage( window, WM_COMMAND, ID_CANCEL, 0L );
+                continue;
+            }
+            if ( message.wParam == VK_TAB ) {
+                HWND next = GetNextDlgTabItem( window, GetFocus(),
+                                               GetKeyState( VK_SHIFT ) < 0 );
+                if ( next )
+                    SetFocus( next );
+                continue;
+            }
+        }
         TranslateMessage( &message );
         DispatchMessage( &message );
     }
