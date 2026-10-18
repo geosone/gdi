@@ -1,10 +1,9 @@
 /* wininstall.c - native Windows 3.1/9x frontend for GDI packages.
  *
- * Uses only the Win16 USER/GDI API and the Open Watcom C runtime. It reads
- * the same INSTALL.INI as INSTALL.EXE, presents the component options as
- * Windows controls and passes the selected option bitmap to the DOS engine.
- * Detector-controlled defaults remain in the indeterminate (automatic)
- * state, so the DOS engine can run the package-defined detector itself.
+ * This is the NE half of the dual-mode INSTALL.EXE. The complete DOS
+ * installer is its MZ stub, so DOS runs the text installer while Windows
+ * loads this frontend. The frontend extracts that stub temporarily when it
+ * needs the existing transactional engine; only one installer is shipped.
  *
  * Copyright (C) 2026 GeosOne. GNU General Public License version 3. */
 
@@ -25,7 +24,10 @@ static HFONT ui_font;
 static int option_count;
 static int has_automatic;
 static int win9x;
+static int engine_running;
 static char source_dir[128];
+static char module_path[128];
+static char engine_path[128];
 static char setup_title[80];
 static char product[100];
 static char welcome_text[1000];
@@ -46,6 +48,88 @@ static int file_exists( const char *path )
     OFSTRUCT of;
     HFILE file = OpenFile( path, &of, OF_EXIST );
     return file != HFILE_ERROR;
+}
+
+static int delete_file( const char *path )
+{
+    OFSTRUCT of;
+    return OpenFile( path, &of, OF_DELETE ) != HFILE_ERROR;
+}
+
+/* Write the MZ part before the NE header to a temporary executable. */
+static int extract_dos_engine( void )
+{
+    OFSTRUCT of;
+    HFILE input, output;
+    BYTE header[64];
+    static BYTE buffer[2048];
+    LONG file_size, stub_size, left;
+    UINT want, got, unique;
+    char *dot;
+    int attempt;
+
+    input = OpenFile( module_path, &of, OF_READ | OF_SHARE_DENY_WRITE );
+    if ( input == HFILE_ERROR )
+        return 0;
+    if ( _lread( input, header, sizeof(header) ) != sizeof(header) ||
+         header[0] != 'M' || header[1] != 'Z' ) {
+        _lclose( input );
+        return 0;
+    }
+    stub_size = (LONG)header[0x3c] |
+                ( (LONG)header[0x3d] << 8 ) |
+                ( (LONG)header[0x3e] << 16 ) |
+                ( (LONG)header[0x3f] << 24 );
+    file_size = _llseek( input, 0L, 2 );
+    if ( stub_size < (LONG)sizeof(header) || stub_size >= file_size ||
+         _llseek( input, 0L, 0 ) < 0 ) {
+        _lclose( input );
+        return 0;
+    }
+
+    engine_path[0] = 0;
+    unique = (UINT)GetTickCount();
+    if ( unique == 0 )
+        unique = 1;
+    for ( attempt = 0; attempt < 100; attempt++ ) {
+        if ( !GetTempFileName( GetTempDrive( 0 ), "GDI", unique + attempt,
+                               engine_path ) )
+            continue;
+        dot = strrchr( engine_path, '.' );
+        if ( dot )
+            strcpy( dot, ".EXE" );
+        else
+            strcat( engine_path, ".EXE" );
+        if ( !file_exists( engine_path ) )
+            break;
+        engine_path[0] = 0;
+    }
+    if ( !*engine_path ) {
+        _lclose( input );
+        return 0;
+    }
+    output = _lcreat( engine_path, 0 );
+    if ( output == HFILE_ERROR ) {
+        _lclose( input );
+        engine_path[0] = 0;
+        return 0;
+    }
+    left = stub_size;
+    while ( left > 0 ) {
+        want = left > (LONG)sizeof(buffer) ? sizeof(buffer) : (UINT)left;
+        got = _lread( input, buffer, want );
+        if ( got != want || _lwrite( output, buffer, want ) != want )
+            break;
+        left -= want;
+    }
+    _lclose( output );
+    _lclose( input );
+    if ( left != 0 ) {
+        delete_file( engine_path );
+        engine_path[0] = 0;
+        return 0;
+    }
+    return 1;
 }
 
 static void read_package( void )
@@ -104,12 +188,11 @@ static HWND make_control( HWND parent, const char *class_name, const char *text,
 
 static void start_dos_setup( HWND window )
 {
-    char installer[128], command[220], bits[MAXOPT + 1];
+    char ini_path[128], command[300], bits[MAXOPT + 1];
     int i;
     UINT result;
-    path_cat( installer, source_dir, "INSTALL.EXE" );
-    if ( !file_exists( installer ) ) {
-        MessageBox( window, "INSTALL.EXE was not found next to WINSTALL.EXE.",
+    if ( !extract_dos_engine() ) {
+        MessageBox( window, "The embedded DOS installation engine could not be extracted.",
                     setup_title, MB_OK | MB_ICONEXCLAMATION );
         return;
     }
@@ -118,13 +201,19 @@ static void start_dos_setup( HWND window )
         bits[i] = state == 2 ? 'x' : state ? '1' : '0';
     }
     bits[option_count] = 0;
-    wsprintf( command, "\"%s\" /O:%s", (LPSTR)installer, (LPSTR)bits );
+    path_cat( ini_path, source_dir, "INSTALL.INI" );
+    wsprintf( command, "\"%s\" /O:%s \"%s\"", (LPSTR)engine_path,
+              (LPSTR)bits, (LPSTR)ini_path );
     result = WinExec( command, SW_SHOWNORMAL );
     if ( result <= 32 ) {
+        delete_file( engine_path );
+        engine_path[0] = 0;
         MessageBox( window, "Windows could not start the DOS installation engine.",
                     setup_title, MB_OK | MB_ICONEXCLAMATION );
         return;
     }
+    engine_running = 1;
+    SetTimer( window, 1, 1000, NULL );
     MessageBox( window,
                 "The installation engine has started. Complete setup in its DOS window.",
                 setup_title, MB_OK | MB_ICONINFORMATION );
@@ -180,7 +269,19 @@ static long FAR PASCAL window_proc( HWND window, UINT message,
             return 0;
         }
         break;
+    case WM_TIMER:
+        /* The executable is fully loaded before WinExec returns. Keep trying
+         * until Windows releases it, then close the minimized frontend. */
+        if ( engine_running && delete_file( engine_path ) ) {
+            engine_running = 0;
+            engine_path[0] = 0;
+            KillTimer( window, 1 );
+            DestroyWindow( window );
+        }
+        return 0;
     case WM_DESTROY:
+        if ( *engine_path )
+            delete_file( engine_path );
         PostQuitMessage( 0 );
         return 0;
     }
@@ -201,6 +302,7 @@ int PASCAL WinMain( HINSTANCE instance, HINSTANCE previous,
     (void)command_line;
     app_instance = instance;
     GetModuleFileName( instance, module, sizeof(module) );
+    strcpy( module_path, module );
     strcpy( source_dir, module );
     slash = strrchr( source_dir, '\\' );
     if ( slash )
@@ -209,7 +311,7 @@ int PASCAL WinMain( HINSTANCE instance, HINSTANCE previous,
         strcpy( source_dir, "." );
     path_cat( ini_path, source_dir, "INSTALL.INI" );
     if ( ini_load( ini_path ) ) {
-        MessageBox( NULL, "INSTALL.INI was not found next to WINSTALL.EXE.",
+        MessageBox( NULL, "INSTALL.INI was not found next to INSTALL.EXE.",
                     "GDI", MB_OK | MB_ICONEXCLAMATION );
         return 2;
     }

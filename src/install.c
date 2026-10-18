@@ -1438,7 +1438,7 @@ static void usage( void )
 	        "  /U    removes the installation (run INSTALL.EXE in the target directory)\n"
 	        "  /B:d: drive of the system to change (CONFIG.SYS, AUTOEXEC.BAT),\n"
 	        "        default: the boot drive\n"
-	        "  /O:   initial option states, e.g. /O:1010 (used by WINSTALL.EXE)\n" );
+	        "  /O:   initial option states, e.g. /O:1010 (used by Windows setup)\n" );
 }
 
 int main( int argc, char **argv )

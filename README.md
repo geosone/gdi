@@ -1,11 +1,11 @@
-# GeosOne DOS Installer
+# GeosOne Dual-Mode Installer
 
-A small installer for DOS programs and drivers (`INSTALL.EXE`, about 42 KB).
-It also includes the native Windows 3.1/9x frontend `WINSTALL.EXE`, written
-directly against the Win16 USER/GDI API without MFC or another UI framework.
-Both programs read the same `INSTALL.INI` next to them. The DOS interface looks
-like the setup of the Qualitas MAX (386MAX) memory manager: a title bar, cyan
-dialog windows and a key bar.
+A single dual-mode `INSTALL.EXE` for DOS programs and drivers. Under DOS its
+MZ part runs the text installer. Windows 3.1/9x loads the native Win16 NE
+frontend from the same file, written directly against USER/GDI without MFC or
+another UI framework. Both modes read the same `INSTALL.INI`. The DOS interface
+looks like the setup of the Qualitas MAX (386MAX) memory manager: a title bar,
+cyan dialog windows and a key bar.
 
 It does the following:
 - shows a welcome text and a license that must be accepted,
@@ -27,8 +27,8 @@ License: GNU General Public License version 3.
 `INSTALL.EXE` reads `INSTALL.INI` from its own directory and takes the files from there.
 `/B:d:` names the drive of the system whose `CONFIG.SYS` and `AUTOEXEC.BAT` are changed (default: the boot drive).
 `/O:bits` overrides initial option states (`1` on, `0` off, any other character
-keeps the INI/detector default). It is primarily the interface used by
-`WINSTALL.EXE`.
+keeps the INI/detector default). It is primarily the internal interface from
+the Windows frontend to the embedded DOS engine.
 
 `INSTALL /U` removes an installation:
 - Run it from the target directory: the installer copies itself and the INI there (`Uninstall=yes`).
@@ -133,19 +133,21 @@ and `[Find]` variables are expanded in the command line.
 
 ## Native Win16 frontend
 
-`WINSTALL.EXE` is an NE executable targeting Windows 3.10 and also runs on
-Windows 95/98/ME. It uses only `USER`, `GDI`, `KERNEL` and the standard Win16
-C runtime. It reads the package title, welcome text and repeated options from
-the normal `INSTALL.INI`, identifies the Windows family with `GetVersion`, and
-shows up to sixteen component check boxes.
+`INSTALL.EXE` is an MZ/NE dual-mode executable. Its NE part targets Windows
+3.10 and also runs on Windows 95/98/ME. It uses only `USER`, `GDI`, `KERNEL`
+and the standard Win16 C runtime. It reads the package title, welcome text and
+repeated options from the normal `INSTALL.INI`, identifies the Windows family
+with `GetVersion`, and shows up to sixteen component check boxes.
 
 Options whose defaults come from `[Detect]` are shown as three-state
 **Automatic** choices. An unchanged automatic choice is passed as `x`, so the
 DOS engine still runs the package-defined detector and decides the default.
-Explicit on/off choices are passed through `/O:`. The current frontend then
-starts `INSTALL.EXE` for license display, copying and transactional edits.
-Moving those remaining engine steps into native Win16 code is the next stage;
-the INI format stays shared.
+Explicit on/off choices are passed through `/O:`. The current frontend extracts
+the embedded MZ installer to the Windows temporary directory, starts it for
+license display, copying and transactional edits, and removes the temporary
+file again. Only the combined `INSTALL.EXE` is distributed or copied for
+uninstall. Moving those remaining engine steps into native Win16 code is the
+next stage; the INI format stays shared.
 
 Registry editing is designed as a native-engine feature, not as OpenASPI
 special handling. The draft transaction format and the different Windows 3.1
@@ -185,7 +187,7 @@ The boot sector is our own (`tools/boot/bs9x.asm`, `make bootsector`). The MS-DO
 
 Open Watcom 2.0 (`WATCOM=/opt/watcom`), GNU make:
 
-    make            -> build/INSTALL.EXE and build/WINSTALL.EXE
+    make            -> build/INSTALL.EXE (combined DOS MZ + Win16 NE)
 
 **Tests:** `test/run.sh` boots DOS in QEMU and runs a test installation with the keys sent through the QEMU monitor, then shows the changed files.
 
