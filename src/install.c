@@ -56,6 +56,7 @@ static int completion_status = 2;
 static int completion_registered;
 static jmp_buf extra_abort;            /* an extra installation was cancelled */
 static int in_extra;                   /* INSTALL.LOG: installed files */
+static char selected_language[9] = "en";
 
 /* text of the installer, replaced by [Text] key=...; "\n" = new line */
 static const char *T( const char *key, const char *def )
@@ -107,6 +108,7 @@ static int expand( char *out, const char *in, int max )
 		else if ( !strnicmp( in, "%WINDIR%", 8 ) ) { rep = windir; l = 8; }
 		else if ( !strnicmp( in, "%BOOT%", 6 ) ) { rep = boot; l = 6; }
 		else if ( !strnicmp( in, "%SRC%", 5 ) ) { rep = srcdir; l = 5; }
+		else if ( !strnicmp( in, "%LANGUAGE%", 10 ) ) { rep = selected_language; l = 10; }
 		else if ( in[0] == '%' && !( ( in[1] == 'O' || in[1] == 'o' ) && isdigit( in[2] ) ) ) {   /* [Find] variables */
 			int i;
 			for ( i = 0; i < nfind; i++ ) {
@@ -2062,6 +2064,86 @@ static int confirm( void );
 static void license( void );
 
 /* the setup steps of an INI (not DOS mode) */
+/* A single choice, shared by DOS setup and the Windows frontend's DOS
+ * transaction. Package files, not separate executable builds, carry text. */
+static void ask_language( void )
+{
+	const char *value;
+	char codes[8][9], labels[8][32];
+	const char *buttons[8];
+	int pos = 0, count = 0, selected = 0, i;
+	while ( ( pos = ini_next( "Languages", "Choice", pos, &value ) ) >= 0 ) {
+		const char *bar = strchr( value, '|' );
+		int length = bar ? (int)( bar - value ) : 0;
+		if ( count == 8 || length < 2 || length > 8 || !bar[1] ||
+			strlen( bar + 1 ) > 31 )
+			fail( "Invalid [Languages] Choice entry." );
+		for ( i = 0; i < length; i++ )
+			if ( !isalnum( (unsigned char)value[i] ) && value[i] != '-' )
+				fail( "Invalid language code." );
+		sprintf( codes[count], "%.*s", length, value );
+		strcpy( labels[count], bar + 1 );
+		buttons[count] = labels[count];
+		if ( !stricmp( codes[count], ini_get( "Languages", "Default", "en" ) ) )
+			selected = count;
+		count++;
+	}
+	if ( !count ) return;
+	selected = scr_message( T( "LanguageTitle", "Language" ),
+		T( "LanguageText", "Select the application language to install:" ),
+		buttons, count, selected, 0 );
+	if ( selected < 0 ) abort_setup();
+	strcpy( selected_language, codes[selected] );
+}
+
+/* Config=package-relative-file|section|key.  The owned INI file is copied
+ * before this setting is written and removed by the normal uninstall log. */
+static void write_language( void )
+{
+	const char *value = ini_get( "Languages", "Config", NULL );
+	char data[200], path[80], setting[150], section[40], key[80], line[256];
+	char *bar, *name;
+	int index, end, i, error;
+	FILE *output;
+	if ( !value ) return;
+	if ( strlen( value ) >= sizeof(data) ) fail( "Invalid language config." );
+	strcpy( data, value );
+	bar = strchr( data, '|' );
+	if ( !bar ) fail( "Invalid language config." );
+	*bar++ = 0;
+	name = data;
+	if ( !*name || name[0] == '\\' || strchr( name, ':' ) || strstr( name, ".." ) ||
+		strlen( dest ) + strlen( name ) + 2 >= sizeof(path) ||
+		strlen( bar ) + strlen( selected_language ) + 2 >= sizeof(setting) )
+		fail( "Language config must be an installed package-relative file." );
+	path_cat( path, dest, name );
+	sprintf( setting, "%s=%s", bar, selected_language );
+	if ( system_set_split( setting, section, key, line ) || ed_load( path ) )
+		fail( "Cannot read the installed language config." );
+	index = ini_find_key( section, key, &end );
+	if ( index == -2 ) fail( "Duplicate language config key." );
+	if ( index >= 0 ) {
+		free( ed[index] );
+		ed[index] = str_dup( line );
+	} else if ( end >= 0 )
+		ed_insert( end, line );
+	else {
+		char header[44];
+		sprintf( header, "[%s]", section );
+		ed_insert( ned, header );
+		ed_insert( ned, line );
+	}
+	/* This is the package's just-copied file, not an external system INI.
+	 * Do not leave untracked .G01 files in its uninstall directory. */
+	output = fopen( path, "w" );
+	if ( !output ) fail( "Cannot write the installed language config." );
+	error = 0;
+	for ( i = 0; i < ned; i++ )
+		if ( fprintf( output, "%s\n", ed[i] ) < 0 ) error = 1;
+	if ( fclose( output ) || error ) fail( "Cannot write the installed language config." );
+	ed_free();
+}
+
 static void install_steps( void )
 {
 	char registry_error[130];
@@ -2072,6 +2154,8 @@ static void install_steps( void )
 	scr_desktop();
 	ask_options();
 	scr_desktop();
+	ask_language();
+	scr_desktop();
 	if ( registry_write_plan( registry_error ) )
 		fail( registry_error );
 	if ( !confirm() )
@@ -2079,6 +2163,7 @@ static void install_steps( void )
 	scr_desktop();
 	run_all( "Before" );
 	copy_all();
+	write_language();
 	patch_all();
 	edit_all();
 	run_all( "After" );
@@ -2088,6 +2173,7 @@ static void install_steps( void )
 static void use_ini( const char *dir )
 {
 	strcpy( srcdir, dir );
+	strcpy( selected_language, "en" );
 	nopt = 0;
 	memset( opt_on, 0, sizeof(opt_on) );
 	memset( opt_value, 0, sizeof(opt_value) );

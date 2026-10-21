@@ -143,6 +143,24 @@ still unchanged; a later administrator change is preserved. Duplicate existing
 keys and malformed journal data are rejected. This is suitable for reversible
 shell selection, for example `Set=3|boot|shell=%DIR%\CALMIRA.EXE`.
 
+**Application language:** a package can provide one single-choice language
+prompt (up to eight codes) during the common DOS installation transaction,
+also when launched by the Win16 frontend:
+
+```ini
+[Languages]
+Default=en
+Choice=en|English
+Choice=de|Deutsch
+Choice=fr|Francais
+Config=CALMIRA.INI|Language|Selected
+```
+
+`Config` names an installed package-relative INI file and the section/key to
+write after copying. Existing other settings are retained. `%LANGUAGE%` is
+available to commands and expanded values. The package supplies the actual
+catalogue files; this feature does not translate the installer interface.
+
 **Binary patches:** `[HexPatch]` accepts hexadecimal byte pairs separated by spaces, commas, hyphens, or nothing. The old and new signatures must have the same length (up to 32 bytes), and the last field is the exact number of expected matches. Setup refuses an unknown or ambiguous file, writes the changed file through a temporary file, and keeps the original as `.G01`, `.G02`, and so on. Re-running Setup recognizes an already patched file. `INSTALL /U` applies the checked reverse transformation. The WIN386 example is the Windows 3.1/3.11 FAT32 compatibility patch; distributors should enable it only for an appropriate DOS/Windows combination.
 
 `PatchIfPresent=` has the same fields and safety checks as `Patch=`, but skips

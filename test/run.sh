@@ -29,6 +29,7 @@ else
     printf '\xcd\x20' > "$OUT/src/TESTTOOL.COM"      # INT 20h
     printf '\xb8\x00\x4c\xcd\x21' > "$OUT/src/YES.COM"
     printf '\xb8\x01\x4c\xcd\x21' > "$OUT/src/NO.COM"
+    printf '[Language]\r\nSelected=en\r\n[Keep]\r\nValue=preserved\r\n' > "$OUT/src/SETTINGS.INI"
     cp "$ROOT/build/INSTALL.EXE" "$OUT/src/TESTVXD.386"
 fi
 printf 'org 100h\nmov dx,501h\nout dx,al\nint 20h\n' > "$OUT/qexit.asm" && nasm -f bin -o "$OUT/src/QEXIT.COM" "$OUT/qexit.asm"
@@ -79,6 +80,11 @@ KEYS=${KEYS:-$DEFAULT_KEYS}
     -device isa-debug-exit,iobase=0x501,iosize=0x02 > "$OUT/monitor.log" 2>&1
 for f in "$OUT"/*.ppm; do [ -f "$f" ] && magick "$f" "${f%.ppm}.png" && rm -f "$f"; done
 tr -d '\r' < "$OUT/serial.log"
+if [ -n "${LANGUAGE:-}" ]; then
+    mcopy -o -i "$P" ::/TESTLANG/SETTINGS.INI "$OUT/LANGUAGE.INI"
+    python3 -c 'import configparser,sys; c=configparser.ConfigParser(); c.read(sys.argv[1]); assert c["Language"]["Selected"] == "de"; assert c["Keep"]["Value"] == "preserved"' "$OUT/LANGUAGE.INI" || exit 1
+    echo "DOS language selection integration passed"
+fi
 if [ -n "${SYSTEMSET:-}" ]; then
     mcopy -o -i "$P" ::/WINDOWS/SYSTEM.INI "$OUT/SYSTEM-AFTER.INI"
     if [ -n "${UNINST:-}" ]; then
