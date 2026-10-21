@@ -136,6 +136,14 @@ static int command_ini( const char FAR *command, char *path, unsigned path_size 
     return 0;
 }
 
+/* GDIPxxxx.EXE, or GDIPOST.EXE of older versions */
+static int is_runner( const char *name )
+{
+    return !stricmp( name, "GDIPOST.EXE" ) ||
+           ( strlen( name ) == 12 && !strnicmp( name, "GDIP", 4 ) &&
+             !stricmp( name + 8, ".EXE" ) );
+}
+
 static int delete_file( const char *path )
 {
     OFSTRUCT of;
@@ -145,25 +153,47 @@ static int delete_file( const char *path )
 
 static void delete_uninstaller( void )
 {
-    char path[128], parent[128], *slash;
+    char path[128], parent[128], top[128], *slash;
+    FILE *f;
     path_cat( path, source_dir, "INSTALL.INI" );
     delete_file( path );
     path_cat( path, source_dir, "INSTALL.EXE" );
     delete_file( path );
-    path_cat( path, source_dir, "GDIPOST.EXE" );
-    gdi_tasks_run( path, 0 );
-    delete_file( path );
+    {   /* the runners: GDIPxxxx.EXE, GDIPOST.EXE of older versions */
+        struct find_t found;
+        path_cat( parent, source_dir, "GDIP*.EXE" );
+        if ( !_dos_findfirst( parent, _A_NORMAL, &found ) )
+            do {
+                path_cat( path, source_dir, found.name );
+                gdi_tasks_run( path, 0 );
+                delete_file( path );
+            } while ( !_dos_findnext( &found ) );
+    }
     path_cat( path, source_dir, "UNINST.PND" );
     delete_file( path );
+    top[0] = 0;   /* DIRS.LOG: the first parent setup created */
+    path_cat( path, source_dir, "DIRS.LOG" );
+    if ( ( f = fopen( path, "r" ) ) != NULL ) {
+        if ( fgets( top, sizeof(top), f ) )
+            top[strcspn( top, "\r\n" )] = 0;
+        fclose( f );
+        delete_file( path );
+    }
     strcpy( parent, source_dir );
     slash = strrchr( parent, '\\' );
     if ( slash == parent + 2 )
         slash[1] = 0;
     else if ( slash )
         *slash = 0;
+    if ( *top && parent[1] == ':' )
+        parent[3] = 0;   /* the parents go as well: out to the root */
     if ( slash )
         chdir( parent );
-    rmdir( source_dir );
+    strcpy( path, source_dir );
+    while ( !rmdir( path ) && *top && stricmp( path, top ) &&
+            ( slash = strrchr( path, '\\' ) ) != NULL && slash - path > 2 &&
+            !strnicmp( path, top, strlen( top ) ) )
+        *slash = 0;
 }
 
 /* -1 = not complete yet; 0 = success; 1 = cancelled; 2 = failed. */
@@ -402,9 +432,12 @@ static void find_update( void )
     sprintf( welcome_text, ini_get( "Text", "UpdateText",
              "%s is already installed in %s. Setup replaces its files; the system settings and the settings files of the program stay as they are." ),
              product, value );
-    if ( version && *version )
-        sprintf( welcome_text + strlen( welcome_text ), " (%s %.20s)",
-                 ini_get( "Text", "UpdateOld", "Installed version:" ), version );
+    if ( ( version && *version ) || *ini_get( "Setup", "Version", "" ) )
+        sprintf( welcome_text + strlen( welcome_text ), "\r\n\r\n%s %.20s\r\n%s %.20s",
+                 ini_get( "Text", "UpdateOld", "Installed version:" ),
+                 version && *version ? version : "?",
+                 ini_get( "Text", "UpdateNew", "New version:" ),
+                 *ini_get( "Setup", "Version", "" ) ? ini_get( "Setup", "Version", "" ) : "?" );
 }
 
 static int registry_preflight( char *message )
@@ -417,6 +450,18 @@ static int registry_preflight( char *message )
         unsigned data_size;
         char error[100];
         number++;
+        if ( !strnicmp( line, "Import=", 7 ) ) {
+            /* Import=condition|FILE.REG: the DOS engine checks its lines */
+            const char *bar = strchr( line + 7, '|' );
+            char path[160];
+            if ( bar )
+                path_cat( path, source_dir, bar + 1 );
+            if ( !bar || !file_exists( path ) ) {
+                wsprintf( message, "Registry line %d: missing .REG file", number );
+                return 0;
+            }
+            continue;
+        }
         if ( gdi_reg_parse_line( line, &entry, error, sizeof(error) ) ||
              ( entry.operation == GDI_REG_SET && !strchr( entry.text, '%' ) &&
                gdi_reg_make_data( &entry, data, &data_size,
@@ -485,15 +530,15 @@ static void start_dos_setup( HWND window )
     ShowWindow( window, SW_MINIMIZE );
 }
 
-/* GDIPOST.EXE (run= in WIN.INI): the work a plain DOS installation left for
- * Windows - REGISTRY.PLN, or the restore after INSTALL /U (UNINST.PND) */
-static int post_tasks( void )
+/* the runner GDIPxxxx.EXE (run= in WIN.INI): the work a plain DOS
+ * installation left for Windows - REGISTRY.PLN, or the restore after
+ * INSTALL /U (UNINST.PND) */
+static int post_tasks( const char *post )
 {
-    char path[160], post[160], error[180];
+    char path[160], error[180];
     DWORD version = GetVersion();
     int failed = 0, nine = LOBYTE( LOWORD( version ) ) >= 4 ||
         ( LOBYTE( LOWORD( version ) ) == 3 && HIBYTE( LOWORD( version ) ) >= 90 );
-    path_cat( post, source_dir, "GDIPOST.EXE" );
     path_cat( path, source_dir, "REGISTRY.PLN" );
     if ( file_exists( path ) ) {
         if ( nine ) {
@@ -679,10 +724,12 @@ int PASCAL WinMain( HINSTANCE instance, HINSTANCE previous,
     if ( !packed_source_path( module, source_dir, sizeof(source_dir) ) )
         strcpy( source_dir, module );
     slash = strrchr( source_dir, '\\' );
-    if ( slash && !stricmp( slash + 1, "GDIPOST.EXE" ) ) {
+    if ( slash && is_runner( slash + 1 ) ) {
+        char runner[128];
         int rc;
+        strcpy( runner, source_dir );
         *slash = 0;
-        rc = post_tasks();
+        rc = post_tasks( runner );
         release_source_path();
         return rc;
     }
@@ -722,7 +769,7 @@ int PASCAL WinMain( HINSTANCE instance, HINSTANCE previous,
               major, minor,
               (LPSTR)( win9x ? "Windows 9x/ME" : "Windows 3.x" ) );
     read_package();
-    if ( !registry_preflight( registry_error ) ) {
+    if ( !uninstall_mode && !registry_preflight( registry_error ) ) {
         MessageBox( NULL, registry_error, setup_title,
                     MB_OK | MB_ICONEXCLAMATION );
         ini_free();

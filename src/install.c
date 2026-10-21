@@ -57,7 +57,7 @@ static char completion_file[80];       /* /W:path: Win16 completion status */
 static char registry_plan_file[80];    /* /R:path: expanded native plan */
 static int registry_family;            /* /F:31 or /F:9X */
 static char task_plan_file[80];        /* /T:path: WIN.INI and groups for the frontend */
-static int registry_deferred;          /* REGISTRY.PLN for GDIPOST.EXE */
+static int registry_deferred;          /* REGISTRY.PLN for the runner (GDIPxxxx.EXE) */
 static int completion_status = 2;
 static int completion_registered;
 static jmp_buf extra_abort;            /* an extra installation was cancelled */
@@ -225,6 +225,53 @@ static int condition_true( const char *condition )
 	return result != NULL && !strcmp( result, "x" );
 }
 
+/* the lines of [Registry]; Import=condition|FILE.REG (REGEDIT 3.1 format,
+ * next to INSTALL.EXE) gives one Set= per "HKEY_CLASSES_ROOT\key = value"
+ * line of the file, without keeping it in memory */
+static FILE *reg_import;
+static char reg_import_cond[40];
+static void strip_eol( char *line );
+
+static int registry_next( int pos, const char **line )
+{
+	static char made[GDI_REG_KEY_MAX + GDI_REG_TEXT_MAX + 64];
+	char buf[GDI_REG_KEY_MAX + GDI_REG_TEXT_MAX + 16], *eq, *v, *e;
+	for ( ;; ) {
+		while ( reg_import && fgets( buf, sizeof(buf), reg_import ) ) {
+			strip_eol( buf );
+			if ( strnicmp( buf, "HKEY_CLASSES_ROOT\\", 18 ) ||
+				( eq = strstr( buf, " =" ) ) == NULL )
+				continue;   /* comments, REGEDIT, keys without a value */
+			for ( e = eq; e > buf + 18 && e[-1] == ' '; e-- )
+				;
+			*e = 0;
+			for ( v = eq + 2; *v == ' '; v++ )
+				;
+			sprintf( made, "Set=%s|HKCR|%s|@|SZ|%s", reg_import_cond, buf + 18, v );
+			*line = made;
+			return pos;
+		}
+		if ( reg_import ) {
+			fclose( reg_import );
+			reg_import = NULL;
+		}
+		if ( ( pos = ini_lines( "Registry", pos, line ) ) < 0 )
+			return pos;
+		if ( !strnicmp( *line, "Import=", 7 ) ) {
+			const char *bar = strchr( *line + 7, '|' );
+			char p[80];
+			if ( !bar || bar - *line - 7 >= (int)sizeof(reg_import_cond) )
+				return -2;
+			sprintf( reg_import_cond, "%.*s", (int)( bar - *line - 7 ), *line + 7 );
+			path_cat( p, srcdir, bar + 1 );
+			if ( !( reg_import = fopen( p, "r" ) ) )
+				return -2;
+			continue;
+		}
+		return pos;
+	}
+}
+
 /* Validate every line, including inactive entries.  This is run before the
  * installer UI can change package files; the final expanded data is checked
  * again while the native plan is written. */
@@ -232,7 +279,7 @@ static int registry_preflight( char *message )
 {
 	const char *line;
 	int pos = 0, number = 0;
-	while ( ( pos = ini_lines( "Registry", pos, &line ) ) >= 0 ) {
+	while ( ( pos = registry_next( pos, &line ) ) >= 0 ) {
 		struct gdi_reg_entry entry;
 		char error[100];
 		unsigned char data[GDI_REG_DATA_MAX];
@@ -243,8 +290,16 @@ static int registry_preflight( char *message )
 		       gdi_reg_make_data( &entry, data, &data_size,
 		                          error, sizeof(error) ) ) ) {
 			sprintf( message, "Registry line %d: %.90s", number, error );
+			if ( reg_import ) {
+				fclose( reg_import );
+				reg_import = NULL;
+			}
 			return -1;
 		}
+	}
+	if ( pos == -2 ) {
+		strcpy( message, "Registry: invalid Import= or missing .REG file" );
+		return -1;
 	}
 	return 0;
 }
@@ -259,14 +314,18 @@ static int registry_write_plan( char *message )
 	int pos = 0, number = 0;
 	char journal[80], error[100];
 	if ( !*registry_plan_file ) {
-		/* plain DOS: the Windows frontend applies the plan as GDIPOST.EXE
+		/* plain DOS: the Windows frontend applies the plan as GDIPxxxx.EXE
 		 * when Windows starts the next time */
 		int active = 0;
-		for ( pos = 0; !active && ( pos = ini_lines( "Registry", pos, &line ) ) >= 0; ) {
+		for ( pos = 0; !active && ( pos = registry_next( pos, &line ) ) >= 0; ) {
 			struct gdi_reg_entry entry;
 			if ( !gdi_reg_parse_line( line, &entry, error, sizeof(error) ) &&
 				condition_true( entry.condition ) )
 				active = 1;
+		}
+		if ( reg_import ) {
+			fclose( reg_import );
+			reg_import = NULL;
 		}
 		if ( !active || ( in_extra && !in_batch ) || !*windir )
 			return 0;
@@ -289,7 +348,7 @@ static int registry_write_plan( char *message )
 	}
 	path_cat( journal, dest, "REGISTRY.LOG" );
 	fprintf( file, "GDI-REGISTRY-PLAN 1\nJournal=%s\n", journal );
-	while ( ( pos = ini_lines( "Registry", pos, &line ) ) >= 0 ) {
+	while ( ( pos = registry_next( pos, &line ) ) >= 0 ) {
 		struct gdi_reg_entry entry;
 		char expanded[GDI_REG_TEXT_MAX + 1], output[1100];
 		unsigned char data[GDI_REG_DATA_MAX];
@@ -346,6 +405,10 @@ static int registry_write_plan( char *message )
 			goto invalid;
 		}
 	}
+	if ( pos == -2 ) {
+		strcpy( error, "invalid Import= or missing .REG file" );
+		goto invalid;
+	}
 	if ( fclose( file ) ) {
 		remove( registry_plan_file );
 		strcpy( message, "Cannot finish registry plan" );
@@ -354,6 +417,10 @@ static int registry_write_plan( char *message )
 	return 0;
 
 invalid:
+	if ( reg_import ) {
+		fclose( reg_import );
+		reg_import = NULL;
+	}
 	fclose( file );
 	remove( registry_plan_file );
 	sprintf( message, "Registry line %d: %.90s", number, error );
@@ -382,6 +449,47 @@ static int mkdirs( const char *path )
 		}
 	mkdir( p );
 	return file_exists( p ) ? 0 : -1;
+}
+
+/* the first parent of the target directory that setup creates: DIRS.LOG
+ * names it, and the uninstaller removes the empty parents up to it */
+static char dest_top[80];
+
+static void note_new_parents( const char *path )
+{
+	char p[80];
+	int i;
+	dest_top[0] = 0;
+	strcpy( p, path );
+	for ( i = 3; p[i]; i++ )
+		if ( p[i] == '\\' ) {
+			p[i] = 0;
+			if ( !file_exists( p ) ) {
+				strcpy( dest_top, p );
+				return;
+			}
+			p[i] = '\\';
+		}
+}
+
+/* removes the target directory and the empty parents setup created */
+static void remove_dest_dir( void )
+{
+	char p[80], top[80], *b;
+	FILE *f;
+	top[0] = 0;
+	path_cat( p, dest, "DIRS.LOG" );
+	if ( ( f = fopen( p, "r" ) ) != NULL ) {
+		if ( fgets( top, sizeof(top), f ) )
+			strip_eol( top );
+		fclose( f );
+		remove( p );
+	}
+	strcpy( p, dest );
+	while ( !rmdir( p ) && *top && stricmp( p, top ) &&
+		( b = strrchr( p, '\\' ) ) != NULL && b - p > 2 &&
+		!strnicmp( p, top, strlen( top ) ) )
+		*b = 0;
 }
 
 static int copy_file( const char *from, const char *to )
@@ -1054,6 +1162,26 @@ error:
 	return -1;
 }
 
+/* removes [section] when it has no lines left (Set= created it) */
+static void ed_drop_empty_section( const char *section )
+{
+	char header[44];
+	int i, j;
+	sprintf( header, "[%s]", section );
+	for ( i = 0; i < ned && stricmp( ed[i], header ); i++ )
+		;
+	if ( i == ned )
+		return;
+	for ( j = i + 1; j < ned && ed[j][0] != '['; j++ )
+		if ( ed[j][0] )
+			return;
+	while ( j > i + 1 )
+		ed_delete( --j );
+	ed_delete( i );
+	if ( i > 0 && i == ned && !ed[i - 1][0] )
+		ed_delete( i - 1 );
+}
+
 static int ed_restore_ini( char *journal, const char *ini_section )
 {
 	FILE *file;
@@ -1086,8 +1214,10 @@ static int ed_restore_ini( char *journal, const char *ini_section )
 			if ( present ) {
 				free( ed[index] );
 				ed[index] = str_dup( oldline );
-			} else
+			} else {
 				ed_delete( index );
+				ed_drop_empty_section( section );
+			}
 		}
 	}
 	return fclose( file ) ? -1 : 1;
@@ -1654,13 +1784,28 @@ static void task_write_plan( void )
 		fail( T( "TaskPlanError", "Cannot write the plan for Windows." ) );
 }
 
-/* plain DOS with registry entries: GDIPOST.EXE (this installer) applies
+/* the copy of this installer that does the registry work at the next start
+ * of Windows (run= in WIN.INI).  Windows 3.x starts a file name only once (a
+ * second GDIPOST.EXE would become an instance of the first, with its file
+ * name), so each package directory gets its own: GDIPxxxx.EXE */
+static void runner_path( char *p )
+{
+	unsigned hash = 0;
+	const char *c;
+	char name[16];
+	for ( c = dest; *c; c++ )
+		hash = hash * 31 + (unsigned char)toupper( (unsigned char)*c );
+	sprintf( name, "GDIP%04X.EXE", hash );
+	path_cat( p, dest, name );
+}
+
+/* plain DOS with registry entries: the runner (this installer) applies
  * REGISTRY.PLN, or restores REGISTRY.LOG after INSTALL /U (UNINST.PND),
  * when Windows starts the next time (run= in WIN.INI) */
 static void post_runner( int add )
 {
 	char from[80], to[80];
-	path_cat( to, dest, "GDIPOST.EXE" );
+	runner_path( to );
 	if ( add ) {
 		path_cat( from, srcdir, "INSTALL.EXE" );
 		if ( stricmp( from, to ) && copy_file( from, to ) ) {
@@ -1694,13 +1839,13 @@ static void deferred_registry( void )
 	post_runner( 1 );
 	path_cat( p, dest, "INSTALL.LOG" );   /* INSTALL /U removes it */
 	if ( ( f = fopen( p, "a" ) ) != NULL ) {
-		path_cat( p, dest, "GDIPOST.EXE" );
+		runner_path( p );
 		fprintf( f, "%s\n", p );
 		fclose( f );
 	}
 }
 
-/* INSTALL /U in plain DOS: 1 = the registry is restored later by GDIPOST */
+/* INSTALL /U in plain DOS: 1 = the registry is restored later by the runner */
 static int uninstall_registry( void )
 {
 	char p[80];
@@ -2159,6 +2304,7 @@ static void ask_dirs( void )
 	strcpy( dest, ini_get( "Setup", "DefaultDir", "C:\\PROGRAM" ) );
 	expand( dest, dest, sizeof(dest) );
 	if ( in_batch ) {   /* [Installer]: the default directory, no questions */
+		note_new_parents( dest );
 		if ( mkdirs( dest ) )
 			fail( T( "DirError", "Please enter a full path (e.g. C:\\DRIVERS) that can be created." ) );
 		find_dest();
@@ -2168,6 +2314,7 @@ static void ask_dirs( void )
 	for ( ;; ) {
 		if ( scr_input( T( "DirTitle", "Destination" ), T( "DirText", "Install the files to this directory:" ), dest, 64 ) )
 			abort_setup();
+		note_new_parents( dest );
 		if ( strlen( dest ) >= 3 && dest[1] == ':' && dest[2] == '\\' && !mkdirs( dest ) )
 			break;
 		{
@@ -2690,6 +2837,14 @@ static void copy_all( void )
 		path_cat( to, dest, "INSTALL.LOG" );
 		old_log_load( to );
 		logf = fopen( to, "w" );
+		if ( *dest_top ) {
+			FILE *f;
+			path_cat( to, dest, "DIRS.LOG" );
+			if ( ( f = fopen( to, "w" ) ) != NULL ) {
+				fprintf( f, "%s\n", dest_top );
+				fclose( f );
+			}
+		}
 	}
 	/* [Dirs]: directories to create (cond|path) */
 	while ( ( pos = ini_lines( "Dirs", pos, &v ) ) >= 0 )
@@ -2855,7 +3010,7 @@ static void remove_all( void )
 				}
 				continue;
 			}
-			path_cat( p, dest, "GDIPOST.EXE" );
+			runner_path( p );
 			if ( pending && !stricmp( l, p ) )
 				continue;   /* runs at the next start of Windows */
 			remove( l );
@@ -2890,7 +3045,7 @@ static void remove_all( void )
 		remove( p );
 		path_cat( p, dest, "INSTALL.EXE" );
 		remove( p );
-		rmdir( dest );
+		remove_dest_dir();
 	}
 }
 
@@ -3346,7 +3501,7 @@ static void run_installers( void )
 			}
 			use_ini( dir );
 			strcpy( windir, mainwin );
-			registry_plan_file[0] = 0;   /* the registry: GDIPOST.EXE in each directory */
+			registry_plan_file[0] = 0;   /* the registry: a runner in each directory */
 			registry_deferred = 0;
 			in_extra = in_batch = 1;
 			cur_inst = i;

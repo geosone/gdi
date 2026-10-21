@@ -138,8 +138,12 @@ static int restore_values( const char *dir, char *error, unsigned size )
 			continue;
 		if ( flag[0] == '1' && ( v = strchr( old, '=' ) ) != NULL )
 			WriteProfileString( s, k, v + 1 );
-		else
+		else {
 			WriteProfileString( s, k, NULL );
+			/* a section without keys left was created by Set= */
+			if ( !GetProfileString( s, NULL, "", now, sizeof(now) ) )
+				WriteProfileString( s, NULL, NULL );
+		}
 	}
 	fclose( f );
 	remove( journal );

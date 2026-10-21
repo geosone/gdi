@@ -11,13 +11,13 @@
 
 #define ERROR_NO_MORE_ITEMS_16 259L
 #define ERROR_MORE_DATA_16     234L
-#define MAX_JOURNAL_RECORDS    400
+#define MAX_JOURNAL_RECORDS    4000   /* OLE2.REG alone: about 1000 */
 
 static struct gdi_reg_entry reg_entry;
 static struct gdi_reg_record reg_record;
 static unsigned char reg_data[GDI_REG_DATA_MAX];
 static char reg_line[1200];
-static long record_offset[MAX_JOURNAL_RECORDS];
+static long __far record_offset[MAX_JOURNAL_RECORDS];   /* own segment */
 
 static void set_error( char *error, unsigned size, const char *text )
 {
