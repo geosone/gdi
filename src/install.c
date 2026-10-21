@@ -1350,6 +1350,56 @@ static int has_progman( void )
 
 /* plain DOS: the groups are changed in their files; PROGMAN.LOG records
  * "G|group" (created) and "I|group|title" (added) for INSTALL /U */
+/* update: the [ProgMan] items of the installed version ("group|title" of
+ * the old INSTALL.INI); only items that are new in this version are added,
+ * so an item the user deleted does not come back */
+#define MAXOLDITEM 64
+static char __far *old_item[MAXOLDITEM];
+static int nold_item;
+
+/* "group|title" of an Item= value (the condition is the first field) */
+static int item_key( const char *v, char *key, unsigned size )
+{
+	const char *g = strchr( v, '|' ), *e;
+	if ( !g || !( e = strchr( g + 1, '|' ) ) )
+		return -1;
+	e = strchr( e + 1, '|' );
+	sprintf( key, "%.*s", e ? (int)( e - g - 1 ) : (int)size - 1, g + 1 );
+	return 0;
+}
+
+static void old_items_load( const char *ini )
+{
+	FILE *f = fopen( ini, "r" );
+	char l[256], key[170];
+	int in = 0;
+	nold_item = 0;
+	if ( !f )
+		return;
+	while ( nold_item < MAXOLDITEM && fgets( l, sizeof(l), f ) ) {
+		strip_eol( l );
+		if ( *l == '[' )
+			in = !strnicmp( l, "[ProgMan]", 9 );
+		else if ( in && !strnicmp( l, "Item=", 5 ) && !item_key( l + 5, key, sizeof(key) ) &&
+			( old_item[nold_item] = _fmalloc( strlen( key ) + 1 ) ) != NULL )
+			_fstrcpy( old_item[nold_item++], key );
+	}
+	fclose( f );
+}
+
+/* is the Item= value v to be added (always, except an old one in an update) */
+static int item_wanted( const char *v )
+{
+	char key[170];
+	int i;
+	if ( !update_mode || item_key( v, key, sizeof(key) ) )
+		return 1;
+	for ( i = 0; i < nold_item; i++ )
+		if ( !_fstricmp( old_item[i], key ) )
+			return 0;
+	return 1;
+}
+
 static void progman_all( void )
 {
 	static char group[80], title[80], command[128], icon[128];
@@ -1361,6 +1411,8 @@ static void progman_all( void )
 		return;
 	path_cat( log, dest, "PROGMAN.LOG" );
 	while ( ( pos = ini_next( "ProgMan", "Item", pos, &v ) ) >= 0 ) {
+		if ( !item_wanted( v ) )
+			continue;
 		rc = progman_item( v, group, title, command, icon, &index );
 		if ( rc < 0 )
 			fail( T( "ProgManDefinition", "Invalid [ProgMan] Item entry." ) );
@@ -1429,7 +1481,7 @@ static void task_write_plan( void )
 		fail( T( "TaskPlanError", "Cannot write the plan for Windows." ) );
 	fprintf( f, "GDI-TASK-PLAN 1\nDir=%s\nWinDir=%s\n", dest, windir );
 	if ( *windir ) {
-		for ( pos = 0; ( pos = ini_next( "Win.ini", "Set", pos, &v ) ) >= 0; ) {
+		for ( pos = 0; !update_mode && ( pos = ini_next( "Win.ini", "Set", pos, &v ) ) >= 0; ) {
 			if ( !( t = cond( v ) ) )
 				continue;
 			if ( system_set_split( t, section, key, line ) )
@@ -1441,7 +1493,7 @@ static void task_write_plan( void )
 			rc = progman_item( v, group, title, command, icon, &index );
 			if ( rc < 0 )
 				fail( T( "ProgManDefinition", "Invalid [ProgMan] Item entry." ) );
-			if ( !rc )
+			if ( !rc && item_wanted( v ) )
 				fprintf( f, "P|%s|%s|%s|%s|%d\n", group, title, command, icon, index );
 		}
 	}
@@ -1933,8 +1985,17 @@ static int confirm( void )
 	b[1] = T( "Cancel", "Cancel" );
 	if ( update_mode ) {
 		b[0] = T( "Update", "Update" );
-		sprintf( text, "%s %s\n\n%s", T( "SumUpdateFiles", "Update the files in:" ), dest,
-			T( "SumUpdateKeep", "CONFIG.SYS, AUTOEXEC.BAT, SYSTEM.INI, WIN.INI, the Program Manager groups and the settings files of the program stay as they are." ) );
+		sprintf( text, "%s %s\n", T( "SumUpdateFiles", "Update the files in:" ), dest );
+		if ( *windir )
+			for ( pos = 0; ( pos = ini_next( "ProgMan", "Item", pos, &v ) ) >= 0; ) {
+				static char group[80], title[80], command[128], icon[128];
+				int index;
+				if ( item_wanted( v ) && !progman_item( v, group, title, command, icon, &index ) &&
+					strlen( text ) + strlen( group ) + strlen( title ) + 200 < sizeof(text) )
+					sprintf( text + strlen( text ), "%s %s: %s\n",
+						T( "SumProgManNew", "New in Program Manager" ), group, title );
+			}
+		sprintf( text + strlen( text ), "\n%s", T( "SumUpdateKeep", "CONFIG.SYS, AUTOEXEC.BAT, SYSTEM.INI, WIN.INI, the existing Program Manager items and the settings files of the program stay as they are." ) );
 		scr_keys( T( "KeysMsg", "Enter=Select  Esc=Abort" ) );
 		return scr_message( T( "SumUpdateTitle", "Ready to update" ), text, b, 2, 0, 0 ) == 0;
 	}
@@ -2213,6 +2274,7 @@ static void find_update( void )
 	update_mode = 1;
 	strcpy( dest, dir );
 	find_dest();
+	old_items_load( p );   /* before the new INSTALL.INI replaces it */
 	for ( i = 0; i < nopt && bits[i]; i++ )
 		opt_on[i] = bits[i] == '1';
 }
@@ -2801,8 +2863,8 @@ static void install_steps( void )
 		scr_desktop();
 		if ( registry_write_plan( registry_error ) )
 			fail( registry_error );
-		task_write_plan();
 	}
+	task_write_plan();   /* an update: only the new Program Manager items */
 	if ( !confirm() )
 		abort_setup();
 	scr_desktop();
@@ -2812,9 +2874,9 @@ static void install_steps( void )
 		write_language();
 		patch_all();
 		edit_all();
-		progman_all();
 		deferred_registry();
 	}
+	progman_all();
 	if ( !stricmp( ini_get( "Setup", "Uninstall", "yes" ), "yes" ) )
 		record_write( 1 );
 	run_all( "After" );

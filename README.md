@@ -188,8 +188,10 @@ entered in `%BOOT%\GDI.INI` (`[Installed] Id=directory|options|version`;
 package is installed again, Setup (DOS engine and Win16 frontend) finds that
 entry and offers an update of that directory with the options chosen then.
 An update only replaces the files: `CONFIG.SYS`, `AUTOEXEC.BAT`, `SYSTEM.INI`,
-`WIN.INI`, the Program Manager groups, the registry and binary patches stay as
-they are, including manual changes. The settings files of the program are not
+`WIN.INI`, the registry, binary patches and the existing Program Manager items
+stay as they are, including manual changes. `[ProgMan]` items that are new in
+this version (group and title not in the installed `INSTALL.INI`) are added and
+logged for `INSTALL /U`; an old item the user deleted does not come back. The settings files of the program are not
 overwritten either:
 
 ```ini
@@ -348,7 +350,7 @@ the Win16 NE portion into the final `INSTALL.EXE`. Intermediate files remain in
 | `KEYS="ret ret ret ret ret ret ret ret ret" UNKEYS="r ret ret ret" UNINST=1 test/run.sh` | installation and `INSTALL /U` |
 | `MENU=1 WINDOWS=1 INI=test/TESTWIN.INI test/run.sh` | multi-configuration `CONFIG.SYS` and `SYSTEM.INI` |
 | `test/win3x.sh` | `[Win.ini]`, `[ProgMan]`, `[Registry]` and replaced files from plain DOS, then Windows 3.11 (`GDIPOST.EXE`), uninstall and Windows again (`WIN311IMG`) |
-| `UPDATE=1 test/win3x.sh` | version 2.0 over 1.0 with a changed settings file and WIN.INI value, then uninstall (add `FRONTEND=1 START=25 STEP=4` for the frontend) |
+| `UPDATE=1 test/win3x.sh` | version 2.0 (one new Program Manager item) over 1.0 with a changed settings file and WIN.INI value, then uninstall (add `FRONTEND=1 START=25 STEP=4` for the frontend) |
 | `FRONTEND=1 START=25 STEP=4 test/win3x.sh` | the same through the Win16 frontend (profile functions, DDE) |
 | `PKG=dir TARGET=NAME test/run.sh` | the distribution in `dir` (its `INSTALL.INI`), target `A:\NAME` |
 
