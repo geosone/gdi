@@ -74,10 +74,32 @@ $(OUT)/INSTALL.EXE: $(WINIMAGE) upx
 clean:
 	rm -rf $(OUT)
 
+# the manual as one PDF: README and the chapters of docs/
+MANUAL := README.md docs/install-ini.md docs/system-files.md docs/registry.md \
+	docs/binary-patches.md docs/uninstall-update.md docs/combined-setup.md \
+	docs/windows.md docs/disks-dos-mode.md docs/building.md \
+	docs/win386-fat32.md docs/ndis386-cpu-speed.md
+VERSION := $(shell sed -n 's/^\#define GDI_VERSION "\(.*\)"/\1/p' src/gdi.h)
+
+docs: $(OUT)/gdi-manual.pdf
+
+$(OUT)/gdi-manual.pdf: $(MANUAL) tools/manual/links.lua | $(OUT)
+	for f in $(MANUAL); do \
+	  printf '\n<!-- chapter %s -->\n\n' "$$(basename $$f .md | tr A-Z a-z)"; \
+	  if [ $$f = README.md ]; then sed '1s/.*/# Introduction/' $$f; else cat $$f; fi; \
+	done > $(OUT)/manual.md
+	pandoc $(OUT)/manual.md -f markdown-yaml_metadata_block -o $@ --pdf-engine=lualatex \
+	  --lua-filter=tools/manual/links.lua --toc --toc-depth=2 -N \
+	  -M title="GeosOne Dual Installer" -M subtitle="Manual, version $(VERSION)" \
+	  -V documentclass=report -V papersize=a4 -V geometry:margin=2.2cm \
+	  -V mainfont="DejaVu Serif" -V sansfont="DejaVu Sans" -V monofont="DejaVu Sans Mono" \
+	  -V fontsize=10pt -V colorlinks=true -V linkcolor=blue -V urlcolor=blue \
+	  --top-level-division=chapter
+
 test-host:
 	test/host.sh
 
-.PHONY: all clean test-host upx
+.PHONY: all clean docs test-host upx
 
 # boot sector for the disk images (tools/boot/bs9x.asm -> tools/GdiDisk.cs)
 bootsector: | $(OUT)

@@ -1,4 +1,4 @@
-# WfW 3.11 NDIS CPU-Speed Patch
+# NDIS.386 on fast CPUs
 
 The optional `NDIS.386` patch prevents the Windows for Workgroups 3.11 network
 driver's startup calibration loop from failing on fast processors. GDI applies

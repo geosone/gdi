@@ -1,4 +1,4 @@
-# Registry transaction format
+# Registry
 
 The native GDI engine processes registry changes from the same package
 `INSTALL.INI`. Registry support remains package-defined: GDI does
@@ -13,6 +13,13 @@ Set=cond|HKLM|Software\GeosOne\OpenASPI|Enabled|DWORD|1
 DeleteValue=cond|HKLM|Software\GeosOne\OpenASPI|OldValue
 DeleteKey=cond|HKLM|Software\GeosOne\OpenASPI\Obsolete
 ```
+
+`Import=cond|FILE.REG` reads a registration file in the Windows 3.1 format
+(`REGEDIT`, then lines `HKEY_CLASSES_ROOT\key = value`) from the package
+directory, as one `Set=cond|HKCR|key|@|SZ|value` per line with a value. Other
+lines (comments, keys without ` =`) are skipped. The file is read line by line
+while the plan is checked and written, so files with hundreds of entries
+(OLE2.REG: about 500) need neither INI lines nor memory.
 
 The condition is always the first field and may be empty. `@` denotes the
 unnamed/default value. Conditions use the existing GDI rules (`1,!2,?NAME`),

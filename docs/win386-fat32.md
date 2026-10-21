@@ -1,4 +1,4 @@
-# WIN386 FAT32 Patch Coverage
+# WIN386.EXE and FAT32
 
 The installer applies the R. Loew Windows 3.11 FAT32 compatibility change by
 exact byte signature, not by language, file size, fixed offset, or a user
