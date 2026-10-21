@@ -6,6 +6,7 @@
 #   UNINST=1 test/run.sh   install, then INSTALL /U from the target directory
 #   PKG=dir TARGET=NAME test/run.sh   install a distribution directory
 #                       (all files of dir, its INSTALL.INI) into A:\NAME
+#   PKG=test/combined TARGET=PKGA KEYS=... test/run.sh   [Installer]
 # Environment: BOOTIMG (DOS boot floppy), INI, KEYS, TIMEOUT
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -18,7 +19,11 @@ crlf() { sed 's/$/\r/'; }
 TARGET=${TARGET:-TESTDRV}
 ARGS=${ARGS:-}
 if [ -n "${PKG:-}" ]; then
-    cp "$PKG"/* "$OUT/src/"
+    cp -r "$PKG"/* "$OUT/src/"
+    # the installer next to every INSTALL.INI of the distribution
+    find "$OUT/src" -name INSTALL.INI | while read -r i; do
+        [ -f "$(dirname "$i")/INSTALL.EXE" ] || cp "$ROOT/build/INSTALL.EXE" "$(dirname "$i")/"
+    done
 else
     cp "$ROOT/build/INSTALL.EXE" "$OUT/src/"
     cp "$INI" "$OUT/src/INSTALL.INI"
@@ -52,7 +57,7 @@ fi
 { echo '@ECHO OFF'; echo 'A:\SRC\RUN.BAT'; } | crlf > "$OUT/AUTOEXEC.BAT"
 P="$OUT/boot.img"
 mmd -i "$P" ::/SRC 2>/dev/null
-mcopy -o -i "$P" "$OUT"/src/* ::/SRC/ && mcopy -o -i "$P" "$OUT/CONFIG.SYS" "$OUT/AUTOEXEC.BAT" ::/ || exit 1
+mcopy -s -o -i "$P" "$OUT"/src/* ::/SRC/ && mcopy -o -i "$P" "$OUT/CONFIG.SYS" "$OUT/AUTOEXEC.BAT" ::/ || exit 1
 if [ -n "${WINDOWS:-}" ]; then   # a fake Windows directory with SYSTEM.INI
     mmd -i "$P" ::/WINDOWS
     printf '\xcd\x20' > "$OUT/WIN.COM"

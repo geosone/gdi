@@ -336,7 +336,17 @@ int gdi_tasks_apply( const char *plan_path, char *error, unsigned size )
 	sprintf( dir, "%.127s", line + 4 );
 	while ( !failed && fgets( line, sizeof(line), plan ) ) {
 		strip_eol( line );
-		if ( line[0] == 'W' && line[1] == '|' )
+		if ( !strncmp( line, "Dir=", 4 ) ) {
+			/* the next package of a combined setup: its own journals */
+			if ( items && fclose( items ) ) {
+				set_error( error, size, "Cannot write PROGMAN.LOG" );
+				failed = 1;
+			}
+			items = NULL;
+			sprintf( dir, "%.127s", line + 4 );
+		} else if ( ( line[0] == 'R' || line[0] == 'U' ) && line[1] == '|' )
+			gdi_tasks_run( line + 2, line[0] == 'R' );   /* GDIPOST.EXE */
+		else if ( line[0] == 'W' && line[1] == '|' )
 			failed = apply_value( dir, line, error, size );
 		else if ( line[0] == 'P' && line[1] == '|' ) {
 			if ( !items ) {

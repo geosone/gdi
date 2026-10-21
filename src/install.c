@@ -61,6 +61,7 @@ static int registry_deferred;          /* REGISTRY.PLN for GDIPOST.EXE */
 static int completion_status = 2;
 static int completion_registered;
 static jmp_buf extra_abort;            /* an extra installation was cancelled */
+static int in_batch;                   /* a package of [Installer] */
 static int in_extra;                   /* INSTALL.LOG: installed files */
 static char selected_language[9] = "en";
 
@@ -106,7 +107,12 @@ static int file_exists( const char *p )
 /* %DIR%, %WINDIR%, %BOOT%, %SRC% */
 static int expand( char *out, const char *in, int max )
 {
+	static char copy[300];
 	int o = 0;
+	if ( in == out ) {   /* in place: %WINDIR% is longer than its name */
+		sprintf( copy, "%.299s", in );
+		in = copy;
+	}
 	while ( *in && o < max - 1 ) {
 		const char *rep = NULL;
 		int l = 0;
@@ -256,14 +262,14 @@ static int registry_write_plan( char *message )
 				condition_true( entry.condition ) )
 				active = 1;
 		}
-		if ( !active || in_extra || !*windir )
+		if ( !active || ( in_extra && !in_batch ) || !*windir )
 			return 0;
 		path_cat( registry_plan_file, dest, "REGISTRY.PLN" );
 		registry_family = 3;
 		registry_deferred = 1;
 		pos = 0;
 	}
-	if ( in_extra ) {
+	if ( in_extra && !in_batch ) {
 		if ( ini_lines( "Registry", 0, &line ) >= 0 ) {
 			strcpy( message,
 			        "Registry entries in an Extras package are not supported yet" );
@@ -1575,6 +1581,8 @@ static void progman_undo( void )
 /* started by the frontend: the WIN.INI values and the items it applies,
  * "GDI-TASK-PLAN 1", Dir=, WinDir=, then "W|section|key=value" and
  * "P|group|title|command|icon|index" (expanded, ANSI) */
+static int task_plan_started;
+
 static void task_write_plan( void )
 {
 	static char group[80], title[80], command[128], icon[128];
@@ -1582,11 +1590,15 @@ static void task_write_plan( void )
 	const char *v, *t;
 	FILE *f;
 	int pos, index, rc;
-	if ( !*task_plan_file || in_extra )
+	if ( !*task_plan_file || ( in_extra && !in_batch ) )
 		return;
-	if ( !( f = fopen( task_plan_file, "w" ) ) )
+	/* [Installer]: one part (Dir=) per package */
+	if ( !( f = fopen( task_plan_file, task_plan_started ? "a" : "w" ) ) )
 		fail( T( "TaskPlanError", "Cannot write the plan for Windows." ) );
-	fprintf( f, "GDI-TASK-PLAN 1\nDir=%s\nWinDir=%s\n", dest, windir );
+	if ( !task_plan_started )
+		fprintf( f, "GDI-TASK-PLAN 1\n" );
+	task_plan_started = 1;
+	fprintf( f, "Dir=%s\nWinDir=%s\n", dest, windir );
 	if ( *windir ) {
 		for ( pos = 0; ( pos = ini_next( "Win.ini", "Set", pos, &v ) ) >= 0; ) {
 			if ( !( t = cond_new( "Win.ini", "Set", v ) ) )
@@ -1623,7 +1635,18 @@ static void post_runner( int add )
 			fail( msg );
 		}
 	}
-	winini_run( add, to );
+	if ( frontend() && *task_plan_file ) {
+		/* Windows runs: the frontend changes run= (R|program) */
+		FILE *f = fopen( task_plan_file, task_plan_started ? "a" : "w" );
+		if ( !f )
+			fail( T( "TaskPlanError", "Cannot write the plan for Windows." ) );
+		if ( !task_plan_started )
+			fprintf( f, "GDI-TASK-PLAN 1\nDir=%s\nWinDir=%s\n", dest, windir );
+		task_plan_started = 1;
+		fprintf( f, "%c|%s\n", add ? 'R' : 'U', to );
+		fclose( f );
+	} else
+		winini_run( add, to );
 	if ( !add )
 		remove( to );
 }
@@ -1891,10 +1914,38 @@ static void show_text( const char *title, const char *file, const char **buttons
 		abort_setup();
 }
 
+/* licenses accepted in this run: the same license of several packages is
+ * shown once.  A license is known by its name (License=Name|file), one
+ * without a name by the length and sum of its text. */
+#define MAXACCEPTED 32
+static long accepted_len[MAXACCEPTED], accepted_sum[MAXACCEPTED];
+static char accepted_name[MAXACCEPTED][45];
+static int naccepted;
+
+static int license_id( const char *file, long *len, long *sum )
+{
+	char p[80];
+	FILE *f;
+	int c;
+	path_cat( p, srcdir, file );
+	if ( !( f = fopen( p, "rb" ) ) )
+		return -1;
+	*len = *sum = 0;
+	while ( ( c = getc( f ) ) != EOF ) {
+		++*len;
+		*sum = *sum * 31 + c;
+	}
+	fclose( f );
+	return 0;
+}
+
 static void show_license( const char *value, const char **buttons )
 {
 	const char *bar = strchr( value, '|' );
-	char file[80], title[120];
+	char file[80], title[120], name_buf[45];
+	long len = 0, sum = 0;
+	int i, known;
+	name_buf[0] = 0;
 	if ( bar ) {
 		const char *name = value;
 		const char *end = bar;
@@ -1909,6 +1960,7 @@ static void show_license( const char *value, const char **buttons )
 		name_len = end - name;
 		if ( name_len > 44 )
 			name_len = 44;
+		sprintf( name_buf, "%.*s", name_len, name );
 		if ( name_len )
 			sprintf( title, "%.70s - %.*s",
 				T( "LicenseTitle", "License agreement" ), name_len, name );
@@ -1918,8 +1970,18 @@ static void show_license( const char *value, const char **buttons )
 		sprintf( file, "%.79s", value );
 		sprintf( title, "%.119s", T( "LicenseTitle", "License agreement" ) );
 	}
+	known = *name_buf || license_id( file, &len, &sum ) == 0;
+	for ( i = 0; known && i < naccepted; i++ )
+		if ( *name_buf ? !stricmp( accepted_name[i], name_buf ) :
+			!accepted_name[i][0] && accepted_len[i] == len && accepted_sum[i] == sum )
+			return;   /* accepted already */
 	show_text( title, file, buttons, 2, 1 );
 	scr_desktop();
+	if ( known && naccepted < MAXACCEPTED ) {
+		strcpy( accepted_name[naccepted], name_buf );
+		accepted_len[naccepted] = len;
+		accepted_sum[naccepted++] = sum;
+	}
 }
 
 /* A comma-separated number list selects License1=, License2=, ... . */
@@ -2045,10 +2107,14 @@ static void read_options( void )
 
 static void ask_options( void )
 {
+	char title[90];
 	if ( !nopt )
 		return;
+	sprintf( title, "%.40s", T( "OptionsTitle", "Options" ) );
+	if ( in_batch )   /* [Installer]: which package */
+		sprintf( title + strlen( title ), " - %.45s", ini_get( "Setup", "Product", "" ) );
 	scr_keys( T( "KeysOpt", "Space=On/off  Enter=Continue  Esc=Abort" ) );
-	if ( scr_checklist( T( "OptionsTitle", "Options" ),
+	if ( scr_checklist( title,
 		T( "OptionsText", "Select the parts to install (Space switches on/off):" ), opt_label, opt_on, nopt ) )
 		abort_setup();
 }
@@ -2058,6 +2124,12 @@ static void ask_dirs( void )
 	const char *value;
 	strcpy( dest, ini_get( "Setup", "DefaultDir", "C:\\PROGRAM" ) );
 	expand( dest, dest, sizeof(dest) );
+	if ( in_batch ) {   /* [Installer]: the default directory, no questions */
+		if ( mkdirs( dest ) )
+			fail( T( "DirError", "Please enter a full path (e.g. C:\\DRIVERS) that can be created." ) );
+		find_dest();
+		return;
+	}
 	scr_keys( T( "KeysInput", "Enter=Continue  Esc=Abort" ) );
 	for ( ;; ) {
 		if ( scr_input( T( "DirTitle", "Destination" ), T( "DirText", "Install the files to this directory:" ), dest, 64 ) )
@@ -2261,13 +2333,12 @@ static void record_path( char *p )
 	sprintf( p, "%s\\GDI.INI", boot );
 }
 
-static int record_read( char *dir, char *bits, char *version )
+static int record_read_key( const char *key, char *dir, char *bits, char *version )
 {
-	char p[80], l[200], key[64];
+	char p[80], l[200];
 	FILE *f;
 	int in = 0, n, found = 0;
 	record_path( p );
-	ini_package_id( key, sizeof(key) );
 	n = strlen( key );
 	if ( !( f = fopen( p, "r" ) ) )
 		return 0;
@@ -2296,6 +2367,13 @@ static int record_read( char *dir, char *bits, char *version )
 }
 
 /* enter (add) or remove this installation in GDI.INI */
+static int record_read( char *dir, char *bits, char *version )
+{
+	char key[64];
+	ini_package_id( key, sizeof(key) );
+	return record_read_key( key, dir, bits, version );
+}
+
 static void record_write( int add )
 {
 	char p[80], t[80], l[200], key[64], bits[MAXOPT + 1];
@@ -2369,7 +2447,7 @@ static void find_update( void )
 	b[1] = T( "Cancel", "Cancel" );
 	scr_desktop();
 	scr_keys( T( "KeysMsg", "Enter=Select  Esc=Abort" ) );
-	if ( scr_message( T( "UpdateTitle", "Update" ), text, b, 2, 0, 0 ) != 0 )
+	if ( !in_batch && scr_message( T( "UpdateTitle", "Update" ), text, b, 2, 0, 0 ) != 0 )
 		abort_setup();
 	update_mode = 1;
 	strcpy( dest, dir );
@@ -2947,25 +3025,33 @@ static void write_language( void )
 	ed_free();
 }
 
+static void batch_choices( void );
+
 static void install_steps( void )
 {
 	char registry_error[130];
-	welcome();
+	if ( !in_batch )
+		welcome();
 	find_update();
-	license();
+	if ( !in_batch )   /* [Installer]: asked for all packages before */
+		license();
 	scr_desktop();
 	if ( !update_mode ) {
 		ask_dirs();
 		scr_desktop();
-		ask_options();
-		scr_desktop();
-		ask_language();
+		if ( in_batch )
+			batch_choices();
+		else {
+			ask_options();
+			scr_desktop();
+			ask_language();
+		}
 		scr_desktop();
 		if ( registry_write_plan( registry_error ) )
 			fail( registry_error );
 	}
 	task_write_plan();   /* an update: only the new Program Manager items */
-	if ( !confirm() )
+	if ( !in_batch && !confirm() )
 		abort_setup();
 	scr_desktop();
 	run_all( "Before" );
@@ -3056,6 +3142,207 @@ static void extras( void )
 		use_ini( maindir );
 		strcpy( dest, maindest );
 	}
+}
+
+/* --- combined setup: [Installer] Inst1= ... Inst99= ------------------------
+ * Each entry is a directory with INSTALL.INI or an .INI file, relative to
+ * INSTALL.EXE ("off|DIR": not selected at first).  The packages chosen are
+ * installed one after the other with their own INI: no welcome, directory
+ * or summary dialogs, but their licenses and options. */
+#define MAXINST 99
+static char *inst_path[MAXINST], *inst_label[MAXINST], *inst_choice[MAXINST];
+static char inst_on[MAXINST], inst_state[MAXINST];
+static int ninst, cur_inst;
+
+/* the options and language chosen for package cur_inst: "0110|de" */
+static void batch_choices( void )
+{
+	const char *c = inst_choice[cur_inst], *bar;
+	int i;
+	if ( !c )
+		return;
+	for ( i = 0; i < nopt && c[i] && c[i] != '|'; i++ )
+		opt_on[i] = c[i] == '1';
+	if ( ( bar = strchr( c, '|' ) ) != NULL && bar[1] )
+		sprintf( selected_language, "%.8s", bar + 1 );
+}
+
+/* first pass: licenses, options and language of package cur_inst */
+static void batch_ask( void )
+{
+	char c[MAXOPT + 12];
+	int i;
+	find_update();
+	license();
+	scr_desktop();
+	if ( !update_mode ) {
+		ask_options();
+		scr_desktop();
+		ask_language();
+		scr_desktop();
+	}
+	for ( i = 0; i < nopt; i++ )
+		c[i] = opt_on[i] ? '1' : '0';
+	sprintf( c + nopt, "|%s", selected_language );
+	inst_choice[cur_inst] = str_dup( c );
+}
+
+/* directory and INI file of an entry */
+static void inst_files( const char *v, char *dir, char *ini )
+{
+	char *b;
+	int n;
+	if ( v[0] && v[1] == ':' )
+		sprintf( dir, "%.79s", v );
+	else
+		path_cat( dir, srcdir, v );
+	n = strlen( dir );
+	if ( n > 4 && !stricmp( dir + n - 4, ".INI" ) ) {
+		strcpy( ini, dir );
+		if ( ( b = strrchr( dir, '\\' ) ) != NULL )
+			*b = 0;
+	} else
+		path_cat( ini, dir, "INSTALL.INI" );
+}
+
+/* a [Setup] value of another INI (without loading it) */
+static void ini_peek( const char *path, const char *key, char *out, int size )
+{
+	FILE *f = fopen( path, "r" );
+	char l[200];
+	int in = 0, n = strlen( key );
+	*out = 0;
+	if ( !f )
+		return;
+	while ( fgets( l, sizeof(l), f ) ) {
+		strip_eol( l );
+		if ( *l == '[' )
+			in = !strnicmp( l, "[Setup]", 7 );
+		else if ( in && !strnicmp( l, key, n ) && l[n] == '=' ) {
+			sprintf( out, "%.*s", size - 1, l + n + 1 );
+			break;
+		}
+	}
+	fclose( f );
+}
+
+static void read_installers( void )
+{
+	char key[12], dir[80], ini[80], product[70], id[64], d2[80], bits[MAXOPT + 1], version[24], label[100];
+	const char *v;
+	int i, k;
+	ninst = 0;
+	for ( i = 1; i <= MAXINST && ninst < MAXINST; i++ ) {
+		sprintf( key, "Inst%d", i );
+		if ( !( v = ini_get( "Installer", key, NULL ) ) || !*v )
+			continue;
+		inst_on[ninst] = 1;
+		if ( !strnicmp( v, "off|", 4 ) ) {
+			inst_on[ninst] = 0;
+			v += 4;
+		} else if ( !strnicmp( v, "on|", 3 ) )
+			v += 3;
+		inst_files( v, dir, ini );
+		ini_peek( ini, "Product", product, sizeof(product) );
+		if ( !*product )
+			sprintf( product, "%.69s", v );
+		/* the key of GDI.INI, as ini_package_id() makes it */
+		ini_peek( ini, "Id", id, sizeof(id) );
+		if ( !*id )
+			strcpy( id, product );
+		for ( k = 0; id[k]; k++ )
+			if ( id[k] == '=' || id[k] == '[' || id[k] == ';' )
+				id[k] = '_';
+		if ( !file_exists( ini ) ) {
+			sprintf( label, "%s (%s)", product, T( "InstMissing", "missing" ) );
+			inst_on[ninst] = 0;
+		} else if ( record_read_key( id, d2, bits, version ) )
+			sprintf( label, "%s (%s)", product, T( "InstInstalled", "installed" ) );
+		else
+			strcpy( label, product );
+		inst_path[ninst] = str_dup( v );
+		inst_label[ninst] = str_dup( label );
+		inst_state[ninst] = 0;
+		ninst++;
+	}
+}
+
+static void run_installers( void )
+{
+	static char maindir[80], mainwin[80], plan[80], dir[80], ini[80];
+	static char text[1500];
+	static const char *ok[1];
+	const char *saved_override = option_override;
+	int i, rc, done = 0, pass;
+	read_installers();
+	if ( !ninst )
+		return;
+	scr_keys( T( "KeysOpt", "Space=On/off  Enter=Continue  Esc=Abort" ) );
+	if ( stricmp( ini_get( "Installer", "Select", "yes" ), "no" ) &&
+		scr_checklist( T( "InstTitle", "Packages" ),
+		T( "InstText", "Select the packages to install (Space switches on/off):" ), (const char **)inst_label, inst_on, ninst ) )
+		abort_setup();
+	scr_desktop();
+	find_windows();
+	scr_keys( T( "KeysInput", "Enter=Continue  Esc=Abort" ) );
+	if ( scr_input( T( "WinTitle", "Windows" ),
+		T( "WinText", "Windows directory for the SYSTEM.INI entries (empty: no Windows):" ), windir, 64 ) )
+		abort_setup();
+	strcpy( maindir, srcdir );
+	strcpy( mainwin, windir );
+	strcpy( plan, registry_plan_file );
+	option_override = NULL;
+	/* first all questions (licenses, options), then the installations */
+	for ( pass = 0; pass < 2; pass++ )
+		for ( i = 0; i < ninst; i++ ) {
+			if ( !inst_on[i] || inst_state[i] )
+				continue;
+			inst_files( inst_path[i], dir, ini );
+			scr_desktop();
+			ini_save();
+			if ( ini_load( ini ) ) {
+				ini_restore();
+				inst_state[i] = 2;
+				continue;
+			}
+			if ( !stricmp( ini_get( "Setup", "Windows", "yes" ), "no" ) && windows_running() ) {
+				ini_restore();
+				inst_state[i] = 4;   /* only from MS-DOS */
+				continue;
+			}
+			use_ini( dir );
+			strcpy( windir, mainwin );
+			registry_plan_file[0] = 0;   /* the registry: GDIPOST.EXE in each directory */
+			registry_deferred = 0;
+			in_extra = in_batch = 1;
+			cur_inst = i;
+			if ( ( rc = setjmp( extra_abort ) ) == 0 ) {
+				if ( pass == 0 )
+					batch_ask();
+				else {
+					install_steps();
+					inst_state[i] = 1;
+					done++;
+				}
+			} else
+				inst_state[i] = rc == 1 ? 3 : 2;
+			in_extra = in_batch = 0;
+			ini_restore();
+			use_ini( maindir );
+			strcpy( windir, mainwin );
+		}
+	strcpy( registry_plan_file, plan );
+	option_override = saved_override;
+	sprintf( text, T( "InstDone", "%d packages are installed." ), done );
+	for ( i = 0; i < ninst; i++ )
+		if ( inst_on[i] && inst_state[i] != 1 && strlen( text ) + strlen( inst_label[i] ) + 60 < sizeof(text) )
+			sprintf( text + strlen( text ), "\n%s: %s", inst_label[i],
+				inst_state[i] == 3 ? T( "InstCancelled", "cancelled" ) :
+				inst_state[i] == 4 ? T( "InstNeedDos", "only from MS-DOS" ) : T( "InstFailed", "failed" ) );
+	ok[0] = T( "OK", "OK" );
+	scr_desktop();
+	scr_keys( T( "KeysMsg", "Enter=Select  Esc=Abort" ) );
+	scr_message( T( "InstTitle", "Packages" ), text, ok, 1, 0, 0 );
 }
 
 static void finish( void )
@@ -3213,6 +3500,11 @@ int main( int argc, char **argv )
 			copy_all();
 			edit_all();
 			run_all( "After" );
+		} else if ( ini_get( "Installer", "Inst1", NULL ) ) {
+			welcome();
+			license();
+			scr_desktop();
+			run_installers();
 		} else
 			install_steps();
 		if ( !stricmp( ini_get( "Setup", "Extras", "no" ), "yes" ) )

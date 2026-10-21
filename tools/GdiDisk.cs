@@ -367,6 +367,8 @@ namespace GeosOne.Gdi
 			readonly byte[] d; int p; uint buf; int n;
 			public Bits(byte[] data, int pos) { d = data; p = pos; }
 			public bool End { get { return p >= d.Length && n <= 0; } }
+			// bits read after the end of the data (zeros)
+			public bool Past { get { return p > d.Length && 8 * (p - d.Length) > n; } }
 			public int Read(int k)
 			{
 				while (n < k) { buf = buf << 8 | (p < d.Length ? d[p] : (byte)0); p++; n += 8; }
@@ -450,6 +452,8 @@ namespace GeosOne.Gdi
 			int pos = 0;
 			bool litRun = false;
 			while ((length < 0 && !b.End) || o.Length < length) {
+				long before = o.Length;
+				if (length < 0 && b.Past) break;
 				int len = litRun ? ml2.Decode(b) : ml1.Decode(b);
 				if (len > 0) {
 					len += 2;
@@ -469,6 +473,9 @@ namespace GeosOne.Gdi
 						pos = (pos + 1) & 4095;
 					}
 				}
+				// no stored length: a code that needed the zeros after the
+				// end of the data is not part of the file
+				if (length < 0 && b.Past) { o.SetLength(before); break; }
 			}
 			byte[] r = o.ToArray();
 			if (length >= 0 && r.Length > length) Array.Resize(ref r, length);

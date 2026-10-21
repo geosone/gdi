@@ -366,15 +366,24 @@ int scr_view( const char *title, ftext *lines, int nlines, const char **buttons,
 int scr_checklist( const char *title, const char *text, const char **items, char *on, int n )
 {
 	int w = 64, lines = scr_text( 0, 0, w - 4, 99, 0, text, 0 );
-	int h = lines + n + 5, x = ( COLS - w ) / 2, y = ( ROWS - h ) / 2, cur = 0, i, k;
+	int rows = n < ROWS - 9 - lines ? n : ROWS - 9 - lines;   /* more: scroll */
+	int h = lines + rows + 5, x = ( COLS - w ) / 2, y = ( ROWS - h ) / 2, cur = 0, top = 0, i, k;
 	scr_window( x, y, w, h, A_WIN, title );
 	scr_text( x + 2, y + 2, w - 4, lines, A_WINTXT, text, 1 );
 	for ( ;; ) {
-		for ( i = 0; i < n; i++ ) {
-			int a = i == cur ? A_BUTSEL : A_WINTXT;
+		if ( cur < top )
+			top = cur;
+		if ( cur >= top + rows )
+			top = cur - rows + 1;
+		for ( i = 0; i < rows; i++ ) {
+			int a = top + i == cur ? A_BUTSEL : A_WINTXT;
 			scr_fill( x + 2, y + 3 + lines + i, w - 4, 1, ' ', a );
-			scr_put( x + 3, y + 3 + lines + i, a, on[i] ? "[X] " : "[ ] " );
-			scr_putn( x + 7, y + 3 + lines + i, a, items[i], w - 10 );
+			scr_put( x + 3, y + 3 + lines + i, a, on[top + i] ? "[X] " : "[ ] " );
+			scr_putn( x + 7, y + 3 + lines + i, a, items[top + i], w - 11 );
+		}
+		if ( rows < n ) {   /* more above / below */
+			scr_put( x + w - 3, y + 3 + lines, A_WINTXT, top ? "\x18" : " " );
+			scr_put( x + w - 3, y + 2 + lines + rows, A_WINTXT, top + rows < n ? "\x19" : " " );
 		}
 		k = scr_key();
 		if ( k == 13 )
@@ -387,6 +396,10 @@ int scr_checklist( const char *title, const char *text, const char **items, char
 			cur--;
 		else if ( k == 0x150 && cur < n - 1 )
 			cur++;
+		else if ( k == 0x149 )   /* page up / down */
+			cur = cur > rows ? cur - rows : 0;
+		else if ( k == 0x151 )
+			cur = cur + rows < n - 1 ? cur + rows : n - 1;
 	}
 }
 

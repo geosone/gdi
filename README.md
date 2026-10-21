@@ -214,6 +214,31 @@ a full path). Without `[Keep]`, existing `*.INI` and `*.CFG` files are kept.
 `INSTALL.LOG` keeps the first backups, so `INSTALL /U` still restores the
 original files; it also removes the entry from `GDI.INI`.
 
+**Combined setup:** an `INSTALL.INI` with an `[Installer]` section installs
+several packages, each with its own `INSTALL.INI`:
+
+```ini
+[Installer]
+Inst1=VSHARE            ; a directory with INSTALL.INI ...
+Inst2=EXTRA\NET.INI     ; ... or an INI file, relative to INSTALL.EXE
+Inst3=off|WINFILE       ; not selected at first
+Select=no               ; install all, without the list (default: yes)
+```
+
+Up to 99 entries (`Inst1` to `Inst99`). Setup shows the packages in a list
+(their `Product=`, marked when `GDI.INI` lists them as installed), all
+selected. Then it asks the licenses and options of every package selected,
+and afterwards installs them one after the other without further questions,
+each into its `DefaultDir` and with its own `INSTALL.LOG`, journals and
+`GDI.INI` entry; `INSTALL /U` removes each package separately. A package
+with `Windows=no` is skipped while Windows runs. Registry entries of a
+package are applied by `GDIPOST.EXE` in its directory. The summary at the
+end names the packages that failed or were cancelled.
+
+**Licenses** are shown once per run: a license is known by its name
+(`License=Name|file`, `License1=Name|file`), one without a name by its text.
+Packages that share a license should give it the same name.
+
 **DOS only:** `[Setup] Windows=no` refuses to run under Windows (DOS engine
 and Win16 frontend, text `[Text] NeedDos`), for packages that replace files
 Windows has open.
@@ -361,6 +386,7 @@ the Win16 NE portion into the final `INSTALL.EXE`. Intermediate files remain in
 | `test/win3x.sh` | `[Win.ini]`, `[ProgMan]`, `[Registry]` and replaced files from plain DOS, then Windows 3.11 (`GDIPOST.EXE`), uninstall and Windows again (`WIN311IMG`) |
 | `UPDATE=1 test/win3x.sh` | version 2.0 (new Program Manager item, WIN.INI value and SYSTEM.INI line) over 1.0 with a changed settings file and WIN.INI value, then uninstall (add `FRONTEND=1 START=25 STEP=4` for the frontend) |
 | `FRONTEND=1 START=25 STEP=4 test/win3x.sh` | the same through the Win16 frontend (profile functions, DDE) |
+| `PKG=test/combined TARGET=PKGA KEYS="ret ret ret ret ret ret ret ret ret ret" test/run.sh` | `[Installer]` with two packages that share a license |
 | `PKG=dir TARGET=NAME test/run.sh` | the distribution in `dir` (its `INSTALL.INI`), target `A:\NAME` |
 
 `test/registry` is the Windows 3.x VM fixture. It creates two temporary HKCR
