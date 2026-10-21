@@ -596,6 +596,91 @@ static void ed_unextend( const char *section )
 	}
 }
 
+static void strip_eol( char *line );
+
+/* update: the entries of the installed version (its INSTALL.INI) for the
+ * system files and the groups.  An update adds only entries that are new in
+ * this version; the old ones stay as they are (or as the user changed them),
+ * and a Program Manager item the user deleted does not come back. */
+#define MAXOLDENTRY 160
+static char __far *old_entry[MAXOLDENTRY];
+static int nold_entry;
+static const char *const update_sections[] = { "Config.sys", "Autoexec.bat",
+	"System.ini", "Win.ini", "ProgMan" };
+
+/* the part of an entry that identifies it: [ProgMan] "group|title" (the
+ * condition is the first field), else the whole value */
+static int entry_id( const char *section, const char *v, char *id, unsigned size )
+{
+	const char *g, *e;
+	if ( stricmp( section, "ProgMan" ) ) {
+		sprintf( id, "%.*s", (int)size - 1, v );
+		return 0;
+	}
+	if ( !( g = strchr( v, '|' ) ) || !( e = strchr( g + 1, '|' ) ) )
+		return -1;
+	e = strchr( e + 1, '|' );
+	sprintf( id, "%.*s", e ? (int)( e - g - 1 ) : (int)size - 1, g + 1 );
+	return 0;
+}
+
+static void old_entries_load( const char *ini )
+{
+	FILE *f = fopen( ini, "r" );
+	char l[256], id[256], *eq;
+	const char *section = NULL;
+	char __far *p;
+	unsigned i;
+	nold_entry = 0;
+	if ( !f )
+		return;
+	while ( nold_entry < MAXOLDENTRY && fgets( l, sizeof(l), f ) ) {
+		strip_eol( l );
+		if ( *l == '[' ) {
+			section = NULL;
+			for ( i = 0; i < sizeof(update_sections) / sizeof(update_sections[0]); i++ )
+				if ( !strnicmp( l + 1, update_sections[i], strlen( update_sections[i] ) ) &&
+					l[1 + strlen( update_sections[i] )] == ']' )
+					section = update_sections[i];
+			continue;
+		}
+		if ( !section || *l == ';' || !( eq = strchr( l, '=' ) ) )
+			continue;
+		*eq = 0;
+		if ( entry_id( section, eq + 1, id, sizeof(id) ) )
+			continue;
+		if ( ( p = _fmalloc( strlen( section ) + strlen( l ) + strlen( id ) + 3 ) ) == NULL )
+			break;
+		_fstrcpy( p, section );
+		_fstrcat( p, "|" );
+		_fstrcat( p, l );
+		_fstrcat( p, "|" );
+		_fstrcat( p, id );
+		old_entry[nold_entry++] = p;
+	}
+	fclose( f );
+}
+
+/* is the entry key=v of section new (always, except an old one in an update) */
+static int entry_new( const char *section, const char *key, const char *v )
+{
+	char id[256], whole[300];
+	int i;
+	if ( !update_mode || entry_id( section, v, id, sizeof(id) ) )
+		return 1;
+	sprintf( whole, "%s|%s|%.250s", section, key, id );
+	for ( i = 0; i < nold_entry; i++ )
+		if ( !_fstricmp( old_entry[i], whole ) )
+			return 0;
+	return 1;
+}
+
+/* cond() of an entry that is to be applied now */
+static const char *cond_new( const char *section, const char *key, const char *v )
+{
+	return entry_new( section, key, v ) ? cond( v ) : NULL;
+}
+
 /* CONFIG.SYS / AUTOEXEC.BAT: lines of Add= (conditional) at the top or
  * bottom; with a [menu] (multi-config CONFIG.SYS) into the [common] block;
  * in AUTOEXEC.BAT before a line that starts Windows */
@@ -646,7 +731,7 @@ static void ed_add_dos( const char *section, int isconfig )
 			}
 	}
 	while ( ( pos = ini_next( section, "Add", pos, &v ) ) >= 0 )
-		if ( ( t = cond( v ) ) != NULL ) {
+		if ( ( t = cond_new( section, "Add", v ) ) != NULL ) {
 			expand( line, t, sizeof(line) );
 			ed_insert( at++, line );
 		}
@@ -654,7 +739,7 @@ static void ed_add_dos( const char *section, int isconfig )
 	while ( ( pos = ini_next( section, "Extend", pos, &v ) ) >= 0 ) {
 		char m[256], x[256], n[256];
 		int found = 0;
-		if ( !( t = cond( v ) ) || ext_split( t, m, x, n ) )
+		if ( !( t = cond_new( section, "Extend", v ) ) || ext_split( t, m, x, n ) )
 			continue;
 		for ( i = 0; i < ned; i++ )
 			if ( contains_any( ed[i], m ) && !is_rem( ed[i] ) ) {
@@ -678,7 +763,7 @@ static void ed_add_ini( void )
 	int pos = 0, i;
 	while ( ( pos = ini_next( "System.ini", "Add", pos, &v ) ) >= 0 ) {
 		const char *bar;
-		if ( !( t = cond( v ) ) || !( bar = strchr( t, '|' ) ) )
+		if ( !( t = cond_new( "System.ini", "Add", v ) ) || !( bar = strchr( t, '|' ) ) )
 			continue;
 		sprintf( sec, "%.*s", (int)( bar - t ), t );
 		expand( line, bar + 1, sizeof(line) );
@@ -841,12 +926,12 @@ static int ed_set_ini( const char *ini_section )
 	const char *value, *text;
 	char journal[80], section[40], key[80], line[256], header[44];
 	FILE *file = NULL;
-	int pos = 0, index, end, present, reuse;
+	int pos = 0, index, end, present, reuse, record, appending = 0;
 	int ansi = !stricmp( ini_section, "Win.ini" );
 	path_cat( journal, dest, set_journal( ini_section ) );
 	reuse = file_exists( journal );
 	while ( ( pos = ini_next( ini_section, "Set", pos, &value ) ) >= 0 ) {
-		text = cond( value );
+		text = cond_new( ini_section, "Set", value );
 		if ( !text )
 			continue;
 		if ( system_set_split( text, section, key, line ) )
@@ -856,8 +941,17 @@ static int ed_set_ini( const char *ini_section )
 		index = ini_find_key( section, key, &end );
 		if ( index == -2 )
 			goto error;
+		record = !reuse;
 		if ( reuse ) {
-			if ( system_set_journal_matches( journal, section, key, line ) != 1 )
+			int matched = system_set_journal_matches( journal, section, key, line );
+			if ( update_mode && matched == 0 ) {
+				/* a value that is new in this version: one more record */
+				if ( !file && !( file = fopen( journal, "a" ) ) )
+					goto error;
+				appending = record = 1;
+			} else if ( update_mode && matched != 1 )
+				continue;   /* the installed version set this key already */
+			else if ( matched != 1 )
 				goto error;
 		} else if ( !file ) {
 			if ( !( file = fopen( journal, "w" ) ) ||
@@ -865,7 +959,7 @@ static int ed_set_ini( const char *ini_section )
 				goto error;
 		}
 		present = index >= 0;
-		if ( !reuse && fprintf( file, "%s\n%s\n%d\n%s\n%s\n", section, key,
+		if ( record && fprintf( file, "%s\n%s\n%d\n%s\n%s\n", section, key,
 			present, present ? ed[index] : "", line ) < 0 )
 			goto error;
 		if ( present ) {
@@ -888,7 +982,8 @@ static int ed_set_ini( const char *ini_section )
 error:
 	if ( file ) {
 		fclose( file );
-		remove( journal );
+		if ( !appending )
+			remove( journal );
 	}
 	return -1;
 }
@@ -941,7 +1036,7 @@ static int has_active( const char *section, const char *key )
 	const char *v;
 	int pos = 0;
 	while ( ( pos = ini_next( section, key, pos, &v ) ) >= 0 )
-		if ( !strcmp( key, "Remove" ) || cond( v ) )
+		if ( !strcmp( key, "Remove" ) ? !update_mode : cond_new( section, key, v ) != NULL )
 			return 1;
 	return 0;
 }
@@ -1186,16 +1281,18 @@ static void edit_file( const char *path, const char *section, int kind )
 		return;
 	if ( ed_load( path ) && uninstall )
 		return;
-	if ( !uninstall && !stricmp( ini_get( section, "Replace", "no" ), "yes" ) )
+	if ( !uninstall && !update_mode && !stricmp( ini_get( section, "Replace", "no" ), "yes" ) )
 		ed_free();   /* a new file (the old one is kept as backup) */
 	if ( kind >= 2 && uninstall ) {
 		restored = ed_restore_ini( set_journal_path, section );
 		if ( restored < 0 )
 			fail( T( "SetRestoreError", "Cannot restore SYSTEM.INI settings." ) );
 	}
-	ed_remove( section );
-	if ( kind < 2 )
-		ed_unextend( section );
+	if ( !update_mode ) {   /* an update only adds the new entries */
+		ed_remove( section );
+		if ( kind < 2 )
+			ed_unextend( section );
+	}
 	if ( !uninstall ) {
 		if ( kind == 2 )
 			ed_add_ini();
@@ -1350,56 +1447,6 @@ static int has_progman( void )
 
 /* plain DOS: the groups are changed in their files; PROGMAN.LOG records
  * "G|group" (created) and "I|group|title" (added) for INSTALL /U */
-/* update: the [ProgMan] items of the installed version ("group|title" of
- * the old INSTALL.INI); only items that are new in this version are added,
- * so an item the user deleted does not come back */
-#define MAXOLDITEM 64
-static char __far *old_item[MAXOLDITEM];
-static int nold_item;
-
-/* "group|title" of an Item= value (the condition is the first field) */
-static int item_key( const char *v, char *key, unsigned size )
-{
-	const char *g = strchr( v, '|' ), *e;
-	if ( !g || !( e = strchr( g + 1, '|' ) ) )
-		return -1;
-	e = strchr( e + 1, '|' );
-	sprintf( key, "%.*s", e ? (int)( e - g - 1 ) : (int)size - 1, g + 1 );
-	return 0;
-}
-
-static void old_items_load( const char *ini )
-{
-	FILE *f = fopen( ini, "r" );
-	char l[256], key[170];
-	int in = 0;
-	nold_item = 0;
-	if ( !f )
-		return;
-	while ( nold_item < MAXOLDITEM && fgets( l, sizeof(l), f ) ) {
-		strip_eol( l );
-		if ( *l == '[' )
-			in = !strnicmp( l, "[ProgMan]", 9 );
-		else if ( in && !strnicmp( l, "Item=", 5 ) && !item_key( l + 5, key, sizeof(key) ) &&
-			( old_item[nold_item] = _fmalloc( strlen( key ) + 1 ) ) != NULL )
-			_fstrcpy( old_item[nold_item++], key );
-	}
-	fclose( f );
-}
-
-/* is the Item= value v to be added (always, except an old one in an update) */
-static int item_wanted( const char *v )
-{
-	char key[170];
-	int i;
-	if ( !update_mode || item_key( v, key, sizeof(key) ) )
-		return 1;
-	for ( i = 0; i < nold_item; i++ )
-		if ( !_fstricmp( old_item[i], key ) )
-			return 0;
-	return 1;
-}
-
 static void progman_all( void )
 {
 	static char group[80], title[80], command[128], icon[128];
@@ -1411,7 +1458,7 @@ static void progman_all( void )
 		return;
 	path_cat( log, dest, "PROGMAN.LOG" );
 	while ( ( pos = ini_next( "ProgMan", "Item", pos, &v ) ) >= 0 ) {
-		if ( !item_wanted( v ) )
+		if ( !entry_new( "ProgMan", "Item", v ) )
 			continue;
 		rc = progman_item( v, group, title, command, icon, &index );
 		if ( rc < 0 )
@@ -1481,8 +1528,8 @@ static void task_write_plan( void )
 		fail( T( "TaskPlanError", "Cannot write the plan for Windows." ) );
 	fprintf( f, "GDI-TASK-PLAN 1\nDir=%s\nWinDir=%s\n", dest, windir );
 	if ( *windir ) {
-		for ( pos = 0; !update_mode && ( pos = ini_next( "Win.ini", "Set", pos, &v ) ) >= 0; ) {
-			if ( !( t = cond( v ) ) )
+		for ( pos = 0; ( pos = ini_next( "Win.ini", "Set", pos, &v ) ) >= 0; ) {
+			if ( !( t = cond_new( "Win.ini", "Set", v ) ) )
 				continue;
 			if ( system_set_split( t, section, key, line ) )
 				fail( T( "SetDefinition", "Invalid [System.ini] Set entry." ) );
@@ -1493,7 +1540,7 @@ static void task_write_plan( void )
 			rc = progman_item( v, group, title, command, icon, &index );
 			if ( rc < 0 )
 				fail( T( "ProgManDefinition", "Invalid [ProgMan] Item entry." ) );
-			if ( !rc && item_wanted( v ) )
+			if ( !rc && entry_new( "ProgMan", "Item", v ) )
 				fprintf( f, "P|%s|%s|%s|%s|%d\n", group, title, command, icon, index );
 		}
 	}
@@ -1983,33 +2030,20 @@ static int confirm( void )
 	int key, pos;
 	b[0] = T( "Install", "Install" );
 	b[1] = T( "Cancel", "Cancel" );
-	if ( update_mode ) {
+	if ( update_mode )
 		b[0] = T( "Update", "Update" );
-		sprintf( text, "%s %s\n", T( "SumUpdateFiles", "Update the files in:" ), dest );
-		if ( *windir )
-			for ( pos = 0; ( pos = ini_next( "ProgMan", "Item", pos, &v ) ) >= 0; ) {
-				static char group[80], title[80], command[128], icon[128];
-				int index;
-				if ( item_wanted( v ) && !progman_item( v, group, title, command, icon, &index ) &&
-					strlen( text ) + strlen( group ) + strlen( title ) + 200 < sizeof(text) )
-					sprintf( text + strlen( text ), "%s %s: %s\n",
-						T( "SumProgManNew", "New in Program Manager" ), group, title );
-			}
-		sprintf( text + strlen( text ), "\n%s", T( "SumUpdateKeep", "CONFIG.SYS, AUTOEXEC.BAT, SYSTEM.INI, WIN.INI, the existing Program Manager items and the settings files of the program stay as they are." ) );
-		scr_keys( T( "KeysMsg", "Enter=Select  Esc=Abort" ) );
-		return scr_message( T( "SumUpdateTitle", "Ready to update" ), text, b, 2, 0, 0 ) == 0;
-	}
-	sprintf( text, "%s %s\n", T( "SumFiles", "Files to:" ), dest );
+	sprintf( text, "%s %s\n", update_mode ? T( "SumUpdateFiles", "Update the files in:" ) :
+		T( "SumFiles", "Files to:" ), dest );
 	pos = 0;
 	while ( ( pos = ini_next( "Config.sys", "Add", pos, &v ) ) >= 0 )
-		if ( ( t = cond( v ) ) != NULL ) {
+		if ( ( t = cond_new( "Config.sys", "Add", v ) ) != NULL ) {
 			expand( line, t, sizeof(line) );
 			if ( strlen( text ) + strlen( line ) + 40 < sizeof(text) )
 				sprintf( text + strlen( text ), "%s\\CONFIG.SYS: %s\n", boot, line );
 		}
 	pos = 0;
 	while ( ( pos = ini_next( "Autoexec.bat", "Add", pos, &v ) ) >= 0 )
-		if ( ( t = cond( v ) ) != NULL ) {
+		if ( ( t = cond_new( "Autoexec.bat", "Add", v ) ) != NULL ) {
 			expand( line, t, sizeof(line) );
 			if ( strlen( text ) + strlen( line ) + 40 < sizeof(text) )
 				sprintf( text + strlen( text ), "%s\\AUTOEXEC.BAT: %s\n", boot, line );
@@ -2017,19 +2051,19 @@ static int confirm( void )
 	pos = 0;   /* Extend: the text to append (or the new line) */
 	while ( ( pos = ini_next( "Autoexec.bat", "Extend", pos, &v ) ) >= 0 ) {
 		char m[256], x[256], n[256];
-		if ( ( t = cond( v ) ) != NULL && !ext_split( t, m, x, n ) && strlen( text ) + strlen( x ) + 60 < sizeof(text) )
+		if ( ( t = cond_new( "Autoexec.bat", "Extend", v ) ) != NULL && !ext_split( t, m, x, n ) && strlen( text ) + strlen( x ) + 60 < sizeof(text) )
 			sprintf( text + strlen( text ), "%s\\AUTOEXEC.BAT: %s ... %s\n", boot, m, x );
 	}
 	if ( windir[0] ) {
 		pos = 0;
 		while ( ( pos = ini_next( "System.ini", "Add", pos, &v ) ) >= 0 )
-			if ( ( t = cond( v ) ) != NULL && strchr( t, '|' ) ) {
+			if ( ( t = cond_new( "System.ini", "Add", v ) ) != NULL && strchr( t, '|' ) ) {
 				expand( line, strchr( t, '|' ) + 1, sizeof(line) );
 				sprintf( text + strlen( text ), "SYSTEM.INI [%.*s]: %s\n", (int)( strchr( t, '|' ) - t ), t, line );
 			}
 		pos = 0;
 		while ( ( pos = ini_next( "System.ini", "Set", pos, &v ) ) >= 0 )
-			if ( ( t = cond( v ) ) != NULL && strchr( t, '|' ) ) {
+			if ( ( t = cond_new( "System.ini", "Set", v ) ) != NULL && strchr( t, '|' ) ) {
 				expand( line, strchr( t, '|' ) + 1, sizeof(line) );
 				if ( strlen( text ) + strlen( line ) + 40 < sizeof(text) )
 					sprintf( text + strlen( text ), "SYSTEM.INI [%.*s]: %s\n",
@@ -2039,7 +2073,7 @@ static int confirm( void )
 	if ( windir[0] ) {
 		pos = 0;
 		while ( ( pos = ini_next( "Win.ini", "Set", pos, &v ) ) >= 0 )
-			if ( ( t = cond( v ) ) != NULL && strchr( t, '|' ) ) {
+			if ( ( t = cond_new( "Win.ini", "Set", v ) ) != NULL && strchr( t, '|' ) ) {
 				expand( line, strchr( t, '|' ) + 1, sizeof(line) );
 				if ( strlen( text ) + strlen( line ) + 40 < sizeof(text) )
 					sprintf( text + strlen( text ), "WIN.INI [%.*s]: %s\n",
@@ -2049,13 +2083,14 @@ static int confirm( void )
 		while ( ( pos = ini_next( "ProgMan", "Item", pos, &v ) ) >= 0 ) {
 			static char group[80], title[80], command[128], icon[128];
 			int index;
-			if ( !progman_item( v, group, title, command, icon, &index ) &&
+			if ( entry_new( "ProgMan", "Item", v ) &&
+				!progman_item( v, group, title, command, icon, &index ) &&
 				strlen( text ) + strlen( group ) + strlen( title ) + 40 < sizeof(text) )
 				sprintf( text + strlen( text ), "%s %s: %s\n",
 					T( "SumProgMan", "Program Manager" ), group, title );
 		}
 	}
-	for ( key = 0; key < 2; key++ )
+	for ( key = 0; key < ( update_mode ? 0 : 2 ); key++ )
 		for ( pos = 0; ( pos = ini_next( "HexPatch", patch_keys[key], pos,
 			&v ) ) >= 0; )
 			if ( ( t = cond( v ) ) != NULL ) {
@@ -2068,7 +2103,7 @@ static int confirm( void )
 						T( "SumPatch", "Binary patch" ), path );
 			}
 	pos = 0;
-	while ( ( pos = ini_next( "HexPatch", "PatchVariant", pos, &v ) ) >= 0 )
+	while ( !update_mode && ( pos = ini_next( "HexPatch", "PatchVariant", pos, &v ) ) >= 0 )
 		if ( ( t = cond( v ) ) != NULL ) {
 			PatchVariant variant;
 			if ( !patch_variant_split( t, &variant ) &&
@@ -2076,9 +2111,14 @@ static int confirm( void )
 				sprintf( text + strlen( text ), "%s (%s): %s\n",
 					T( "SumPatch", "Binary patch" ), variant.label, variant.path );
 		}
-	strcat( text, T( "SumBackup", "\nThe original files are kept as *.G01, *.G02, ..." ) );
+	if ( update_mode ) {
+		strcat( text, "\n" );
+		strcat( text, T( "SumUpdateKeep", "Existing entries and the settings files of the program stay as they are." ) );
+	} else
+		strcat( text, T( "SumBackup", "\nThe original files are kept as *.G01, *.G02, ..." ) );
 	scr_keys( T( "KeysMsg", "Enter=Select  Esc=Abort" ) );
-	return scr_message( T( "SumTitle", "Ready to install" ), text, b, 2, 0, 0 ) == 0;
+	return scr_message( update_mode ? T( "SumUpdateTitle", "Ready to update" ) :
+		T( "SumTitle", "Ready to install" ), text, b, 2, 0, 0 ) == 0;
 }
 
 /* is %NAME% used in an active line of the configuration sections? */
@@ -2274,7 +2314,7 @@ static void find_update( void )
 	update_mode = 1;
 	strcpy( dest, dir );
 	find_dest();
-	old_items_load( p );   /* before the new INSTALL.INI replaces it */
+	old_entries_load( p );   /* before the new INSTALL.INI replaces it */
 	for ( i = 0; i < nopt && bits[i]; i++ )
 		opt_on[i] = bits[i] == '1';
 }
@@ -2873,10 +2913,11 @@ static void install_steps( void )
 	if ( !update_mode ) {   /* an update keeps the system settings */
 		write_language();
 		patch_all();
-		edit_all();
-		deferred_registry();
 	}
+	edit_all();      /* an update: only the entries new in this version */
 	progman_all();
+	if ( !update_mode )
+		deferred_registry();
 	if ( !stricmp( ini_get( "Setup", "Uninstall", "yes" ), "yes" ) )
 		record_write( 1 );
 	run_all( "After" );

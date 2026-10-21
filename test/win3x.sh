@@ -40,7 +40,7 @@ run() {
 }
 fetch() {
     d="$OUT/files/$1"; mkdir -p "$d"
-    for f in WINDOWS/WIN.INI WINDOWS/PROGMAN.INI WINDOWS/REPL.TXT WINDOWS/REG.DAT; do mcopy -o -i "$P" "::/$f" "$d/" 2>/dev/null; done
+    for f in WINDOWS/WIN.INI WINDOWS/SYSTEM.INI WINDOWS/PROGMAN.INI WINDOWS/REPL.TXT WINDOWS/REG.DAT; do mcopy -o -i "$P" "::/$f" "$d/" 2>/dev/null; done
     mcopy -o -i "$P" "::/WINDOWS/*.GRP" "$d/" 2>/dev/null
     mcopy -o -s -i "$P" "::/PMTEST" "$d/" 2>/dev/null
 }
@@ -55,7 +55,7 @@ if [ -n "${UPDATE:-}" ]; then
     sed -i 's/^Value=installed/Value=changed by the user/' "$OUT/WIN.INI"
     mcopy -o -i "$P" "$OUT/WIN.INI" ::/WINDOWS/
     fetch 1-installed
-    sed -i 's/^Version=1.0/Version=2.0/; s/^\(Item=1|GDI Testgruppe|Editor Test.*\)$/\1\nItem=1|GDI Testgruppe|Neues Tool|%DIR%\\TESTTOOL.COM\r/' "$OUT/src/INSTALL.INI"
+    sed -i 's/^Version=1.0/Version=2.0/; s/^\(Item=1|GDI Testgruppe|Editor Test.*\)$/\1\nItem=1|GDI Testgruppe|Neues Tool|%DIR%\\TESTTOOL.COM\r/; s/^\(Set=1|windows|Beep=no.*\)$/\1\nSet=1|GdiTest|Neu=2.0\r\n\r\n[System.ini]\r\nRemove=gditest=\r\nAdd=1|GdiTest|gditest=2.0\r/' "$OUT/src/INSTALL.INI"
     echo 'GDI test readme 2.0' | crlf > "$OUT/src/README.TXT"
     echo 'setting=default 2.0' | crlf > "$OUT/src/PMTEST.CFG"
     mcopy -o -i "$P" "$OUT"/src/* ::/SRC/
