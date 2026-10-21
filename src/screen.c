@@ -1,4 +1,4 @@
-/* screen.c - text mode user interface of the GeosOne DOS Installer:
+/* screen.c - text mode user interface of the GeosOne Dual Installer:
  * 80x25 color text screen written directly to video memory, windows with a
  * title in the frame and a shadow, buttons, a line editor and a text viewer
  * (the look of the Qualitas MAX installer).

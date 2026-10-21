@@ -15,6 +15,7 @@
 #include "gdi.h"
 #include "regtxn.h"
 #include "winreg16.h"
+#include "wintasks.h"
 
 #define MAXOPT       16
 #define ID_OPTION    100
@@ -38,6 +39,7 @@ static char engine_path[128];
 static char completion_path[128];
 static char package_ini[128];
 static char registry_plan_path[128];
+static char task_plan_path[128];
 static char setup_title[80];
 static char product[100];
 static char welcome_text[1000];
@@ -144,6 +146,11 @@ static void delete_uninstaller( void )
     path_cat( path, source_dir, "INSTALL.INI" );
     delete_file( path );
     path_cat( path, source_dir, "INSTALL.EXE" );
+    delete_file( path );
+    path_cat( path, source_dir, "GDIPOST.EXE" );
+    gdi_tasks_run( path, 0 );
+    delete_file( path );
+    path_cat( path, source_dir, "UNINST.PND" );
     delete_file( path );
     strcpy( parent, source_dir );
     slash = strrchr( parent, '\\' );
@@ -257,12 +264,19 @@ static int extract_dos_engine( void )
             strcpy( dot, ".REG" );
         else
             strcat( registry_plan_path, ".REG" );
+        strcpy( task_plan_path, engine_path );
+        dot = strrchr( task_plan_path, '.' );
+        if ( dot )
+            strcpy( dot, ".TSK" );
+        else
+            strcat( task_plan_path, ".TSK" );
         if ( !file_exists( engine_path ) && !file_exists( completion_path ) &&
-             !file_exists( registry_plan_path ) )
+             !file_exists( registry_plan_path ) && !file_exists( task_plan_path ) )
             break;
         engine_path[0] = 0;
         completion_path[0] = 0;
         registry_plan_path[0] = 0;
+        task_plan_path[0] = 0;
     }
     if ( !*engine_path ) {
         _lclose( input );
@@ -408,10 +422,10 @@ static void start_dos_setup( HWND window )
                   (LPSTR)package_ini );
     else
         wsprintf( command,
-                  "%s /O:%s /W:\"%s\" /R:\"%s\" /F:%s \"%s\"",
+                  "%s /O:%s /W:\"%s\" /R:\"%s\" /T:\"%s\" /F:%s \"%s\"",
                   (LPSTR)engine_path, (LPSTR)bits, (LPSTR)completion_path,
-                  (LPSTR)registry_plan_path, (LPSTR)( win9x ? "9X" : "31" ),
-                  (LPSTR)package_ini );
+                  (LPSTR)registry_plan_path, (LPSTR)task_plan_path,
+                  (LPSTR)( win9x ? "9X" : "31" ), (LPSTR)package_ini );
     result = WinExec( command, SW_SHOWNORMAL );
     if ( result <= 32 ) {
         char error[120];
@@ -428,6 +442,42 @@ static void start_dos_setup( HWND window )
     engine_running = 1;
     SetTimer( window, 1, 1000, NULL );
     ShowWindow( window, SW_MINIMIZE );
+}
+
+/* GDIPOST.EXE (run= in WIN.INI): the work a plain DOS installation left for
+ * Windows - REGISTRY.PLN, or the restore after INSTALL /U (UNINST.PND) */
+static int post_tasks( void )
+{
+    char path[160], post[160], error[180];
+    DWORD version = GetVersion();
+    int failed = 0, nine = LOBYTE( LOWORD( version ) ) >= 4 ||
+        ( LOBYTE( LOWORD( version ) ) == 3 && HIBYTE( LOWORD( version ) ) >= 90 );
+    path_cat( post, source_dir, "GDIPOST.EXE" );
+    path_cat( path, source_dir, "REGISTRY.PLN" );
+    if ( file_exists( path ) ) {
+        if ( nine ) {
+            strcpy( error, "Windows 9x registry backend is not available yet." );
+            failed = 1;
+        } else if ( !( failed = gdi_reg16_apply_plan( path, error, sizeof(error) ) ) )
+            delete_file( path );
+    }
+    path_cat( path, source_dir, "UNINST.PND" );
+    if ( !failed && file_exists( path ) ) {
+        path_cat( path, source_dir, "REGISTRY.LOG" );
+        if ( file_exists( path ) && !nine )
+            failed = gdi_reg16_restore_journal( path, error, sizeof(error) );
+        if ( !failed ) {
+            delete_file( path );
+            delete_uninstaller();
+            return 0;
+        }
+    }
+    if ( failed ) {
+        MessageBox( NULL, error, "GDI", MB_OK | MB_ICONEXCLAMATION );
+        return 2;
+    }
+    gdi_tasks_run( post, 0 );
+    return 0;
 }
 
 static long FAR PASCAL window_proc( HWND window, UINT message,
@@ -499,7 +549,10 @@ static long FAR PASCAL window_proc( HWND window, UINT message,
                 int registry_failed = 0;
                 if ( uninstall_mode ) {
                     path_cat( journal_path, source_dir, "REGISTRY.LOG" );
-                    if ( file_exists( journal_path ) ) {
+                    /* WIN.INI values and groups, then the registry */
+                    registry_failed = gdi_tasks_restore( source_dir,
+                        registry_error, sizeof(registry_error) );
+                    if ( !registry_failed && file_exists( journal_path ) ) {
                         if ( win9x ) {
                             strcpy( registry_error,
                                     "Windows 9x registry restore is not available yet." );
@@ -513,12 +566,17 @@ static long FAR PASCAL window_proc( HWND window, UINT message,
                             delete_uninstaller();
                         }
                     }
-                    else
+                    else if ( !registry_failed )
                         delete_uninstaller();
-                } else if ( !win9x && *registry_plan_path )
-                    registry_failed = gdi_reg16_apply_plan(
-                        registry_plan_path, registry_error,
-                        sizeof(registry_error) );
+                } else {
+                    if ( !win9x && *registry_plan_path )
+                        registry_failed = gdi_reg16_apply_plan(
+                            registry_plan_path, registry_error,
+                            sizeof(registry_error) );
+                    if ( !registry_failed && *task_plan_path )
+                        registry_failed = gdi_tasks_apply( task_plan_path,
+                            registry_error, sizeof(registry_error) );
+                }
                 if ( registry_failed )
                     MessageBox( window, registry_error, setup_title,
                                 MB_OK | MB_ICONEXCLAMATION );
@@ -526,6 +584,9 @@ static long FAR PASCAL window_proc( HWND window, UINT message,
             if ( *registry_plan_path )
                 delete_file( registry_plan_path );
             registry_plan_path[0] = 0;
+            if ( *task_plan_path )
+                delete_file( task_plan_path );
+            task_plan_path[0] = 0;
             KillTimer( window, 1 );
             DestroyWindow( window );
         }
@@ -537,6 +598,8 @@ static long FAR PASCAL window_proc( HWND window, UINT message,
             delete_file( completion_path );
         if ( *registry_plan_path )
             delete_file( registry_plan_path );
+        if ( *task_plan_path )
+            delete_file( task_plan_path );
         release_source_path();
         PostQuitMessage( 0 );
         return 0;
@@ -571,6 +634,13 @@ int PASCAL WinMain( HINSTANCE instance, HINSTANCE previous,
     if ( !packed_source_path( module, source_dir, sizeof(source_dir) ) )
         strcpy( source_dir, module );
     slash = strrchr( source_dir, '\\' );
+    if ( slash && !stricmp( slash + 1, "GDIPOST.EXE" ) ) {
+        int rc;
+        *slash = 0;
+        rc = post_tasks();
+        release_source_path();
+        return rc;
+    }
     if ( slash )
         *slash = 0;
     else
@@ -591,6 +661,14 @@ int PASCAL WinMain( HINSTANCE instance, HINSTANCE previous,
         return 2;
     }
 
+    if ( !stricmp( ini_get( "Setup", "Windows", "yes" ), "no" ) ) {
+        MessageBox( NULL, ini_get( "Text", "NeedDos",
+                    "Please quit Windows and run this setup from MS-DOS." ),
+                    ini_get( "Setup", "Title", "Setup" ), MB_OK | MB_ICONINFORMATION );
+        ini_free();
+        release_source_path();
+        return 1;
+    }
     version = GetVersion();
     major = LOBYTE( LOWORD( version ) );
     minor = HIBYTE( LOWORD( version ) );

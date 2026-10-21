@@ -1,4 +1,4 @@
-# GeosOne DOS Installer (INSTALL.EXE) - GNU make, Open Watcom
+# GeosOne Dual Installer (INSTALL.EXE) - GNU make, Open Watcom
 #   make [WATCOM=/opt/watcom]
 WATCOM ?= /opt/watcom
 export WATCOM
@@ -12,8 +12,8 @@ LINK := $(WATCOM)/binl/wlink
 COPT := -q -bt=dos -ms -0 -os -s -zq -wx -I$(WATCOM)/h
 WCOPT := -q -bt=windows -ms -0 -zW -os -s -zq -w4 -we -I$(WATCOM)/h -I$(WATCOM)/h/win
 
-OBJS := $(addprefix $(OUT)/,install.obj screen.obj ini.obj archive.obj hexpatch.obj regtxn.obj)
-WINOBJS := $(OUT)/wininstall.obj $(OUT)/winini.obj $(OUT)/winregtxn.obj $(OUT)/winreg16.obj
+OBJS := $(addprefix $(OUT)/,install.obj screen.obj ini.obj archive.obj hexpatch.obj regtxn.obj progman.obj)
+WINOBJS := $(OUT)/wininstall.obj $(OUT)/winini.obj $(OUT)/winregtxn.obj $(OUT)/winreg16.obj $(OUT)/wintasks.obj
 DOSIMAGE := $(OUT)/INSTALL.STB
 DOSPACKED := $(OUT)/INSTALL.PST
 WINIMAGE := $(OUT)/INSTALL.UNP
@@ -45,7 +45,7 @@ $(DOSPACKED): $(DOSIMAGE) upx
 	cp $< $@
 	$(UPX) --best $@
 
-$(OUT)/wininstall.obj: src/wininstall.c src/gdi.h | $(OUT)
+$(OUT)/wininstall.obj: src/wininstall.c src/gdi.h src/wintasks.h | $(OUT)
 	$(CC) $(WCOPT) -fo=$@ $<
 
 $(OUT)/winini.obj: src/ini.c src/gdi.h | $(OUT)
@@ -54,13 +54,16 @@ $(OUT)/winini.obj: src/ini.c src/gdi.h | $(OUT)
 $(OUT)/winregtxn.obj: src/regtxn.c src/regtxn.h | $(OUT)
 	$(CC) $(WCOPT) -fo=$@ $<
 
+$(OUT)/wintasks.obj: src/wintasks.c src/wintasks.h | $(OUT)
+	$(CC) $(WCOPT) -fo=$@ $<
+
 $(OUT)/winreg16.obj: src/winreg16.c src/winreg16.h src/regtxn.h | $(OUT)
 	$(CC) $(WCOPT) -fo=$@ $<
 
 $(WINIMAGE): $(DOSPACKED) $(WINOBJS)
 	$(LINK) option quiet format windows name $@ option map=$(OUT)/INSTALLW.map \
 	  $(foreach o,$(WINOBJS),file $(o)) libpath $(WATCOM)/lib286/win \
-	  libpath $(WATCOM)/lib286 library windows,shell,clibs \
+	  libpath $(WATCOM)/lib286 library windows,shell,ddeml,clibs \
 	  option stack=8k,heapsize=4k,version=3.10 option stub=$(DOSPACKED)
 
 $(OUT)/INSTALL.EXE: $(WINIMAGE) upx

@@ -1,4 +1,4 @@
-/* archive.c - GDA archives of the GeosOne DOS Installer: compressed files
+/* archive.c - GDA archives of the GeosOne Dual Installer: compressed files
  * on one or more disks (NAME.D01, NAME.D02, ...), made by mkgda.ps1.
  *
  * Disk file:   header, records, end mark

@@ -25,12 +25,12 @@ else
     cp "$ROOT/LICENSE" "$OUT/src/LICENSE.TXT"
     printf 'Second component license\nMust also be accepted.\n' | crlf > "$OUT/src/LICENSE2.TXT"
     printf 'TESTDRV readme\nline 2\n' | crlf > "$OUT/src/README.TXT"
-    cp "$ROOT/build/INSTALL.EXE" "$OUT/src/TESTDRV.SYS"
+    printf 'TESTDRV test driver\r\n' > "$OUT/src/TESTDRV.SYS"
     printf '\xcd\x20' > "$OUT/src/TESTTOOL.COM"      # INT 20h
     printf '\xb8\x00\x4c\xcd\x21' > "$OUT/src/YES.COM"
     printf '\xb8\x01\x4c\xcd\x21' > "$OUT/src/NO.COM"
     printf '[Language]\r\nSelected=en\r\n[Keep]\r\nValue=preserved\r\n' > "$OUT/src/SETTINGS.INI"
-    cp "$ROOT/build/INSTALL.EXE" "$OUT/src/TESTVXD.386"
+    printf 'TESTVXD test VxD\r\n' > "$OUT/src/TESTVXD.386"
 fi
 printf 'org 100h\nmov dx,501h\nout dx,al\nint 20h\n' > "$OUT/qexit.asm" && nasm -f bin -o "$OUT/src/QEXIT.COM" "$OUT/qexit.asm"
 if [ -n "${MENU:-}" ]; then   # multi-config CONFIG.SYS
@@ -68,9 +68,9 @@ if [ -n "${HEXPATCH:-}" ]; then
     mcopy -o -i "$P" "$OUT/WIN386.EXE" "$OUT/NDIS.386" ::/WINDOWS/SYSTEM/
 fi
 DEFAULT_KEYS="ret ret ret ret ret ret ret ret ret"
-[ -n "${UNINST:-}" ] && DEFAULT_KEYS="ret ret ret ret ret ret"
+[ -n "${UNINST:-}" ] && DEFAULT_KEYS="ret ret ret ret ret ret ret ret ret"
 KEYS=${KEYS:-$DEFAULT_KEYS}
-[ -n "${UNINST:-}" ] && KEYS="$KEYS ${UNKEYS:-r}"
+[ -n "${UNINST:-}" ] && KEYS="$KEYS ${UNKEYS:-r ret ret ret}"
 {
     sleep ${START:-8}; n=0
     for k in $KEYS; do n=$((n+1)); echo "screendump $OUT/s$n.ppm"; sleep 1; echo "sendkey $k"; sleep 2; done

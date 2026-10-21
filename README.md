@@ -1,4 +1,4 @@
-# GeosOne Dual-Mode Installer
+# GeosOne Dual Installer
 
 A single dual-mode `INSTALL.EXE` for DOS programs and drivers. Under DOS its
 MZ part runs the text installer. Windows 3.1/9x loads the native Win16 NE
@@ -23,19 +23,25 @@ License: GNU General Public License version 3.
 
 ## Usage
 
-    INSTALL [/U] [/B:d:] [/O:bits] [file.INI]
+    INSTALL [/U] [/B:d:] [/O:bits] [/T:plan] [file.INI]
 
 `INSTALL.EXE` reads `INSTALL.INI` from its own directory and takes the files from there.
 `/B:d:` names the drive of the system whose `CONFIG.SYS` and `AUTOEXEC.BAT` are changed (default: the boot drive).
 `/O:bits` overrides initial option states (`1` on, `0` off, any other character
 keeps the INI/detector default). It is primarily the internal interface from
-the Windows frontend to the embedded DOS engine.
+the Windows frontend to the embedded DOS engine. `/T:plan` is the same: the
+engine writes the resolved `[Win.ini]` and `[ProgMan]` entries to this file
+for the frontend instead of editing `WIN.INI` and the groups itself.
 
 `INSTALL /U` removes an installation:
 - Run it from the target directory: the installer copies itself and the INI there (`Uninstall=yes`).
 - It removes the `Remove=` lines and the `Extend=` texts from the configuration files, then deletes the files listed in `INSTALL.LOG` and the directory.
 
 **Backups:** the original configuration files are kept as `CONFIG.G01`, `AUTOEXEC.G01`, `SYSTEM.G01`; further runs write `.G02` and so on.
+An installed file that replaces an existing one outside `%DIR%` (for example
+`REPL.TXT=%WINDIR%\REPL.TXT`) is kept the same way; `INSTALL.LOG` records
+`path|backup`, and `INSTALL /U` puts the original back. A second installation
+keeps the first backup.
 
 ## INSTALL.INI
 
@@ -142,6 +148,43 @@ in `%DIR%\SYSTEM.SET`. Uninstall restores it only while the installed value is
 still unchanged; a later administrator change is preserved. Duplicate existing
 keys and malformed journal data are rejected. This is suitable for reversible
 shell selection, for example `Set=3|boot|shell=%DIR%\CALMIRA.EXE`.
+
+**WIN.INI values:** `[Win.ini]` takes the same `Set=condition|section|key=value`
+lines as `[System.ini]` and journals them in `%DIR%\WIN.SET` (same format as
+`SYSTEM.SET`). In plain DOS the engine edits `WIN.INI` itself; under Windows,
+which keeps `WIN.INI` in memory, the Win16 frontend writes the values with
+the profile functions. Both sides restore the same journal on `INSTALL /U`.
+
+**Program Manager:** `[ProgMan]` adds items to Windows 3.x groups:
+
+```ini
+[ProgMan]
+Item=1|Zubehör|Calmira|%DIR%\CALMIRA.EXE
+Item=2|Calmira|Hilfe|WINHELP.EXE %DIR%\CALMIRA.HLP|WINHELP.EXE|0
+```
+
+The fields are condition, group, title, command line, icon file (default: the
+program of the command line) and icon index. A missing group is created. An
+item whose title is already in the group is left alone. In plain DOS the
+engine writes the `.GRP` files and `PROGMAN.INI` directly (Program Manager
+extracts the icons again on its next start); under Windows the frontend uses
+DDE with Program Manager. Both record `%DIR%\PROGMAN.LOG` (`G|group` for a
+created group, `I|group|title` for an added item), and `INSTALL /U` removes
+those items and the created groups once they are empty.
+
+Texts in `INSTALL.INI` are in the DOS code page (850); `[Win.ini]` and
+`[ProgMan]` texts are converted to ANSI for Windows.
+
+**Windows-only work from DOS:** registry entries cannot be written from plain
+DOS. The engine then stores the plan as `%DIR%\REGISTRY.PLN`, copies itself to
+`%DIR%\GDIPOST.EXE` and adds that to `run=` in `WIN.INI`. On the next start of
+Windows, `GDIPOST.EXE` applies the plan and removes itself from `run=`.
+`INSTALL /U` from DOS works the other way round: it leaves `UNINST.PND`, and
+`GDIPOST.EXE` restores `REGISTRY.LOG` and removes the directory.
+
+**DOS only:** `[Setup] Windows=no` refuses to run under Windows (DOS engine
+and Win16 frontend, text `[Text] NeedDos`), for packages that replace files
+Windows has open.
 
 **Application language:** a package can provide one single-choice language
 prompt (up to eight codes) during the common DOS installation transaction,
@@ -278,11 +321,13 @@ the Win16 NE portion into the final `INSTALL.EXE`. Intermediate files remain in
 
 | Command | Test |
 |---|---|
-| `make test-host` | binary-patch checks plus registry plan/type/journal validation |
+| `make test-host` | binary-patch checks, registry plan/type/journal validation and Program Manager group files |
 | `test/run.sh` | installation |
 | `WINDOWS=1 HEXPATCH=1 INI=test/TESTHEX.INI test/run.sh` | DOS binary-patch integration (add `TARGET=TESTHEX UNINST=1` for reverse) |
 | `UNINST=1 test/run.sh` | installation and `INSTALL /U` |
 | `MENU=1 WINDOWS=1 INI=test/TESTWIN.INI test/run.sh` | multi-configuration `CONFIG.SYS` and `SYSTEM.INI` |
+| `test/win3x.sh` | `[Win.ini]`, `[ProgMan]`, `[Registry]` and replaced files from plain DOS, then Windows 3.11 (`GDIPOST.EXE`), uninstall and Windows again (`WIN311IMG`) |
+| `FRONTEND=1 START=25 STEP=4 test/win3x.sh` | the same through the Win16 frontend (profile functions, DDE) |
 | `PKG=dir TARGET=NAME test/run.sh` | the distribution in `dir` (its `INSTALL.INI`), target `A:\NAME` |
 
 `test/registry` is the Windows 3.x VM fixture. It creates two temporary HKCR

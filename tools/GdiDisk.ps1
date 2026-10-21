@@ -1,4 +1,4 @@
-# GdiDisk.ps1 - loads the disk set tools of the GeosOne DOS Installer
+# GdiDisk.ps1 - loads the disk set tools of the GeosOne Dual Installer
 # (GdiDisk.cs: FAT12 images, SZDD/KWAJ expand, GDA archives).
 #   . ./GdiDisk.ps1      (dot-source; Windows PowerShell 5.1 or pwsh 7)
 # Copyright (C) 2026 GeosOne.  GNU General Public License version 3.

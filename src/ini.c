@@ -1,4 +1,4 @@
-/* ini.c - INSTALL.INI and text files of the GeosOne DOS Installer
+/* ini.c - INSTALL.INI and text files of the GeosOne Dual Installer
  *
  * The INI file is kept as a list of lines with the index of their section;
  * keys may occur several times in a section (e.g. Add=), [Files] and other

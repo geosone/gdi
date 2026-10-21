@@ -12,3 +12,8 @@ echo "hexpatch tests passed"
 ${CC:-cc} -std=c89 -pedantic -Wall -Wextra -Werror \
 	-Isrc src/regtxn.c test/regtxn_test.c -o "$work_dir/regtxn_test"
 "$work_dir/regtxn_test"
+
+${CC:-cc} -std=c89 -pedantic -Wall -Wextra -Werror \
+	-Isrc src/progman.c test/progman_test.c -o "$work_dir/progman_test"
+mkdir "$work_dir/progman"
+"$work_dir/progman_test" "$work_dir/progman"

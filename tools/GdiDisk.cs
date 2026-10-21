@@ -1,4 +1,4 @@
-// GdiDisk.cs - disk set tools of the GeosOne DOS Installer, loaded by
+// GdiDisk.cs - disk set tools of the GeosOne Dual Installer, loaded by
 // GdiDisk.ps1 with Add-Type (C# 5: Windows PowerShell 5.1 and pwsh):
 //   Fat12Image   1.44 MB FAT12 floppy images (write, contiguous files)
 //   Fat12Reader  read the files of a FAT12/FAT16 floppy image

@@ -1,4 +1,4 @@
-/* install.c - GeosOne DOS Installer (INSTALL.EXE): installs a DOS program
+/* install.c - GeosOne Dual Installer (INSTALL.EXE): installs a DOS program
  * or driver as described by INSTALL.INI (next to INSTALL.EXE):
  * welcome text, license to accept, target directory, options, files to
  * copy, lines to add to / remove from CONFIG.SYS, AUTOEXEC.BAT and the
@@ -20,9 +20,11 @@
 #include <i86.h>
 #include <process.h>
 #include <setjmp.h>
+#include <malloc.h>
 #include "gdi.h"
 #include "hexpatch.h"
 #include "regtxn.h"
+#include "progman.h"
 
 #define MAXOPT   16
 #define MAXLINE  600
@@ -52,6 +54,8 @@ static const char *gdi_self;           /* argv[0] */
 static char completion_file[80];       /* /W:path: Win16 completion status */
 static char registry_plan_file[80];    /* /R:path: expanded native plan */
 static int registry_family;            /* /F:31 or /F:9X */
+static char task_plan_file[80];        /* /T:path: WIN.INI and groups for the frontend */
+static int registry_deferred;          /* REGISTRY.PLN for GDIPOST.EXE */
 static int completion_status = 2;
 static int completion_registered;
 static jmp_buf extra_abort;            /* an extra installation was cancelled */
@@ -240,8 +244,23 @@ static int registry_write_plan( char *message )
 	FILE *file;
 	int pos = 0, number = 0;
 	char journal[80], error[100];
-	if ( !*registry_plan_file )
-		return 0;
+	if ( !*registry_plan_file ) {
+		/* plain DOS: the Windows frontend applies the plan as GDIPOST.EXE
+		 * when Windows starts the next time */
+		int active = 0;
+		for ( pos = 0; !active && ( pos = ini_lines( "Registry", pos, &line ) ) >= 0; ) {
+			struct gdi_reg_entry entry;
+			if ( !gdi_reg_parse_line( line, &entry, error, sizeof(error) ) &&
+				condition_true( entry.condition ) )
+				active = 1;
+		}
+		if ( !active || in_extra || !*windir )
+			return 0;
+		path_cat( registry_plan_file, dest, "REGISTRY.PLN" );
+		registry_family = 3;
+		registry_deferred = 1;
+		pos = 0;
+	}
 	if ( in_extra ) {
 		if ( ini_lines( "Registry", 0, &line ) >= 0 ) {
 			strcpy( message,
@@ -436,11 +455,14 @@ static void ed_delete( int at )
 	ned--;
 }
 
-/* keep a copy of the original: NAME.G01, NAME.G02, ... */
-static void backup( const char *path )
+/* keep a copy of the original: NAME.G01, NAME.G02, ...; its name goes to
+ * saved (if not NULL), "" when there was nothing to keep or it failed */
+static void backup_as( const char *path, char *saved )
 {
 	char b[80], *dot;
 	int i;
+	if ( saved )
+		*saved = 0;
 	if ( !file_exists( path ) )
 		return;
 	strcpy( b, path );
@@ -450,10 +472,16 @@ static void backup( const char *path )
 	for ( i = 1; i < 100; i++ ) {
 		sprintf( dot, ".G%02d", i );
 		if ( !file_exists( b ) ) {
-			copy_file( path, b );
+			if ( !copy_file( path, b ) && saved )
+				strcpy( saved, b );
 			return;
 		}
 	}
+}
+
+static void backup( const char *path )
+{
+	backup_as( path, NULL );
 }
 
 static int ed_save( const char *path )
@@ -800,20 +828,29 @@ error:
 	return -1;
 }
 
-static int ed_set_ini( void )
+/* journal of the Set= entries of an INI section: SYSTEM.SET, WIN.SET */
+static const char *set_journal( const char *ini_section )
+{
+	return stricmp( ini_section, "Win.ini" ) ? "SYSTEM.SET" : "WIN.SET";
+}
+
+static int ed_set_ini( const char *ini_section )
 {
 	const char *value, *text;
 	char journal[80], section[40], key[80], line[256], header[44];
 	FILE *file = NULL;
 	int pos = 0, index, end, present, reuse;
-	path_cat( journal, dest, "SYSTEM.SET" );
+	int ansi = !stricmp( ini_section, "Win.ini" );
+	path_cat( journal, dest, set_journal( ini_section ) );
 	reuse = file_exists( journal );
-	while ( ( pos = ini_next( "System.ini", "Set", pos, &value ) ) >= 0 ) {
+	while ( ( pos = ini_next( ini_section, "Set", pos, &value ) ) >= 0 ) {
 		text = cond( value );
 		if ( !text )
 			continue;
 		if ( system_set_split( text, section, key, line ) )
 			goto error;
+		if ( ansi )   /* WIN.INI is written in the code page of Windows */
+			gdi_pm_oem_to_ansi( line );
 		index = ini_find_key( section, key, &end );
 		if ( index == -2 )
 			goto error;
@@ -854,12 +891,12 @@ error:
 	return -1;
 }
 
-static int ed_restore_ini( char *journal )
+static int ed_restore_ini( char *journal, const char *ini_section )
 {
 	FILE *file;
 	char header[40], section[40], key[80], flag[8], oldline[256], newline[256];
 	int index, end, present;
-	path_cat( journal, dest, "SYSTEM.SET" );
+	path_cat( journal, dest, set_journal( ini_section ) );
 	if ( !( file = fopen( journal, "r" ) ) )
 		return 0;
 	if ( !fgets( header, sizeof(header), file ) )
@@ -1131,38 +1168,39 @@ static void patch_all( void )
 	patch_variants();
 }
 
+/* kind: 0 CONFIG.SYS, 1 AUTOEXEC.BAT, 2 SYSTEM.INI, 3 WIN.INI */
 static void edit_file( const char *path, const char *section, int kind )
 {
-	char set_journal[80];
+	char set_journal_path[80];
 	int restored = 0, set_journal_exists = 0;
-	if ( kind == 2 && uninstall ) {
-		path_cat( set_journal, dest, "SYSTEM.SET" );
-		set_journal_exists = file_exists( set_journal );
+	if ( kind >= 2 && uninstall ) {
+		path_cat( set_journal_path, dest, set_journal( section ) );
+		set_journal_exists = file_exists( set_journal_path );
 	}
 	if ( !has_active( section, "Add" ) && !has_active( section, "Remove" ) &&
 		!has_active( section, "Extend" ) &&
-		!( kind == 2 && ( has_active( section, "Set" ) ||
+		!( kind >= 2 && ( has_active( section, "Set" ) ||
 			set_journal_exists ) ) )
 		return;
 	if ( ed_load( path ) && uninstall )
 		return;
 	if ( !uninstall && !stricmp( ini_get( section, "Replace", "no" ), "yes" ) )
 		ed_free();   /* a new file (the old one is kept as backup) */
-	if ( kind == 2 && uninstall ) {
-		restored = ed_restore_ini( set_journal );
+	if ( kind >= 2 && uninstall ) {
+		restored = ed_restore_ini( set_journal_path, section );
 		if ( restored < 0 )
 			fail( T( "SetRestoreError", "Cannot restore SYSTEM.INI settings." ) );
 	}
 	ed_remove( section );
-	if ( kind != 2 )
+	if ( kind < 2 )
 		ed_unextend( section );
 	if ( !uninstall ) {
 		if ( kind == 2 )
 			ed_add_ini();
-		else
+		else if ( kind < 2 )
 			ed_add_dos( section, kind == 0 );
 	}
-	if ( kind == 2 && !uninstall && ed_set_ini() )
+	if ( kind >= 2 && !uninstall && ed_set_ini( section ) )
 		fail( T( "SetDefinition", "Invalid [System.ini] Set entry." ) );
 	if ( ed_save( path ) ) {
 		char msg[120];
@@ -1170,8 +1208,300 @@ static void edit_file( const char *path, const char *section, int kind )
 		fail( msg );
 	}
 	if ( restored > 0 )
-		remove( set_journal );
+		remove( set_journal_path );
 	ed_free();
+}
+
+/* --- Windows tasks: WIN.INI run=, Program Manager, the frontend's plan --- */
+
+/* the engine was started by the Win16 frontend: WIN.INI and the groups are
+ * changed by the frontend (Windows keeps them in memory while it runs) */
+static int frontend( void )
+{
+	return *completion_file != 0;
+}
+
+/* Windows runs (enhanced mode, or standard / real mode of Windows 3.x) */
+static int windows_running( void )
+{
+	union REGS r;
+	r.x.ax = 0x1600;
+	int86( 0x2F, &r, &r );
+	if ( r.h.al != 0 && r.h.al != 0x80 )
+		return 1;
+	r.x.ax = 0x4680;
+	int86( 0x2F, &r, &r );
+	return r.x.ax == 0;
+}
+
+/* add (1) or remove (0) a program in run= of [windows] in WIN.INI */
+static void winini_run( int add, const char *program )
+{
+	char path[80], value[256], out[256], word[80];
+	const char *v;
+	int index, end, found = 0, n;
+	path_cat( path, windir, "WIN.INI" );
+	if ( !*windir || ( ed_load( path ) && !add ) )
+		return;
+	index = ini_find_key( "windows", "run", &end );
+	if ( index == -2 )
+		fail( T( "SetDefinition", "Invalid [System.ini] Set entry." ) );
+	value[0] = 0;
+	if ( index >= 0 && ( v = strchr( ed[index], '=' ) ) != NULL )
+		sprintf( value, "%.255s", v + 1 );
+	strcpy( out, "run=" );
+	for ( v = value; *v; ) {
+		while ( *v == ' ' || *v == '\t' || *v == ',' )
+			v++;
+		for ( n = 0; v[n] && v[n] != ' ' && v[n] != '\t' && v[n] != ','; n++ );
+		if ( !n )
+			break;
+		sprintf( word, "%.*s", n < 79 ? n : 79, v );
+		v += n;
+		if ( !stricmp( word, program ) ) {
+			found = 1;
+			if ( !add )
+				continue;
+		}
+		if ( strlen( out ) + strlen( word ) + 2 < sizeof(out) ) {
+			if ( out[4] )
+				strcat( out, " " );
+			strcat( out, word );
+		}
+	}
+	if ( found == add ) {
+		ed_free();
+		return;
+	}
+	if ( add && strlen( out ) + strlen( program ) + 2 < sizeof(out) ) {
+		if ( out[4] )
+			strcat( out, " " );
+		strcat( out, program );
+	}
+	if ( index >= 0 ) {
+		free( ed[index] );
+		ed[index] = str_dup( out );
+	} else if ( end >= 0 ) {
+		while ( end > 0 && !ed[end - 1][0] )
+			end--;
+		ed_insert( end, out );
+	} else {
+		ed_insert( 0, "[windows]" );
+		ed_insert( 1, out );
+		ed_insert( 2, "" );
+	}
+	if ( ed_save( path ) ) {
+		char msg[120];
+		sprintf( msg, "%s %s", T( "WriteError", "Cannot write" ), path );
+		fail( msg );
+	}
+	ed_free();
+}
+
+/* [ProgMan] Item=cond|Group|Title|Command[|Icon file[|Icon index]]: fields
+ * expanded and converted to ANSI; 1 = condition false, -1 = invalid */
+static int progman_item( const char *value, char *group, char *title,
+	char *command, char *icon, int *index )
+{
+	static char data[300];
+	char *field[6], *p;
+	int n = 1;
+	if ( strlen( value ) >= sizeof(data) )
+		return -1;
+	strcpy( data, value );
+	field[0] = data;
+	for ( p = data; *p && n < 6; p++ )
+		if ( *p == '|' ) {
+			*p = 0;
+			field[n++] = p + 1;
+		}
+	if ( n < 4 || strchr( p, '|' ) )
+		return -1;
+	if ( strlen( trim_field( field[0] ) ) > GDI_REG_CONDITION_MAX )
+		return -1;
+	if ( !condition_true( trim_field( field[0] ) ) )
+		return 1;
+	sprintf( group, "%.79s", trim_field( field[1] ) );
+	sprintf( title, "%.79s", trim_field( field[2] ) );
+	expand( command, trim_field( field[3] ), 128 );
+	if ( n > 4 && *trim_field( field[4] ) )
+		expand( icon, trim_field( field[4] ), 128 );
+	else {   /* the program of the command line */
+		sprintf( icon, "%.127s", command );
+		if ( ( p = strchr( icon, ' ' ) ) != NULL )
+			*p = 0;
+	}
+	*index = n > 5 ? atoi( trim_field( field[5] ) ) : 0;
+	if ( !*group || !*title || !*command )
+		return -1;
+	gdi_pm_oem_to_ansi( group );
+	gdi_pm_oem_to_ansi( title );
+	gdi_pm_oem_to_ansi( command );
+	gdi_pm_oem_to_ansi( icon );
+	return 0;
+}
+
+static int has_progman( void )
+{
+	return has_entry( "ProgMan", "Item" );
+}
+
+/* plain DOS: the groups are changed in their files; PROGMAN.LOG records
+ * "G|group" (created) and "I|group|title" (added) for INSTALL /U */
+static void progman_all( void )
+{
+	static char group[80], title[80], command[128], icon[128];
+	const char *v;
+	char log[80], msg[160];
+	FILE *f = NULL;
+	int pos = 0, rc, created, index;
+	if ( frontend() || !*windir )
+		return;
+	path_cat( log, dest, "PROGMAN.LOG" );
+	while ( ( pos = ini_next( "ProgMan", "Item", pos, &v ) ) >= 0 ) {
+		rc = progman_item( v, group, title, command, icon, &index );
+		if ( rc < 0 )
+			fail( T( "ProgManDefinition", "Invalid [ProgMan] Item entry." ) );
+		if ( rc )
+			continue;
+		rc = gdi_pm_add_item( windir, group, title, command, icon, index, &created );
+		if ( rc < 0 ) {
+			sprintf( msg, "%s %.80s", T( "ProgManError", "Cannot change the Program Manager group" ), group );
+			fail( msg );
+		}
+		if ( rc )
+			continue;   /* already there */
+		if ( !f && !( f = fopen( log, "a" ) ) ) {
+			sprintf( msg, "%s %s", T( "WriteError", "Cannot write" ), log );
+			fail( msg );
+		}
+		if ( created )
+			fprintf( f, "G|%s\n", group );
+		fprintf( f, "I|%s|%s\n", group, title );
+	}
+	if ( f )
+		fclose( f );
+}
+
+/* INSTALL /U in plain DOS: take the items and groups out again */
+static void progman_undo( void )
+{
+	char log[80], l[180], *bar;
+	FILE *f;
+	int pass;
+	if ( frontend() || !*windir )
+		return;
+	path_cat( log, dest, "PROGMAN.LOG" );
+	for ( pass = 0; pass < 2; pass++ ) {   /* items, then empty groups */
+		if ( !( f = fopen( log, "r" ) ) )
+			return;
+		while ( fgets( l, sizeof(l), f ) ) {
+			strip_eol( l );
+			if ( pass == 0 && l[0] == 'I' && l[1] == '|' && ( bar = strchr( l + 2, '|' ) ) != NULL ) {
+				*bar = 0;
+				if ( gdi_pm_remove_item( windir, l + 2, bar + 1 ) < 0 )
+					fail( T( "ProgManError", "Cannot change the Program Manager group" ) );
+			}
+			if ( pass == 1 && l[0] == 'G' && l[1] == '|' &&
+				gdi_pm_remove_group( windir, l + 2 ) < 0 )
+				fail( T( "ProgManError", "Cannot change the Program Manager group" ) );
+		}
+		fclose( f );
+	}
+	remove( log );
+}
+
+/* started by the frontend: the WIN.INI values and the items it applies,
+ * "GDI-TASK-PLAN 1", Dir=, WinDir=, then "W|section|key=value" and
+ * "P|group|title|command|icon|index" (expanded, ANSI) */
+static void task_write_plan( void )
+{
+	static char group[80], title[80], command[128], icon[128];
+	char section[40], key[80], line[256];
+	const char *v, *t;
+	FILE *f;
+	int pos, index, rc;
+	if ( !*task_plan_file || in_extra )
+		return;
+	if ( !( f = fopen( task_plan_file, "w" ) ) )
+		fail( T( "TaskPlanError", "Cannot write the plan for Windows." ) );
+	fprintf( f, "GDI-TASK-PLAN 1\nDir=%s\nWinDir=%s\n", dest, windir );
+	if ( *windir ) {
+		for ( pos = 0; ( pos = ini_next( "Win.ini", "Set", pos, &v ) ) >= 0; ) {
+			if ( !( t = cond( v ) ) )
+				continue;
+			if ( system_set_split( t, section, key, line ) )
+				fail( T( "SetDefinition", "Invalid [System.ini] Set entry." ) );
+			gdi_pm_oem_to_ansi( line );
+			fprintf( f, "W|%s|%s\n", section, line );
+		}
+		for ( pos = 0; ( pos = ini_next( "ProgMan", "Item", pos, &v ) ) >= 0; ) {
+			rc = progman_item( v, group, title, command, icon, &index );
+			if ( rc < 0 )
+				fail( T( "ProgManDefinition", "Invalid [ProgMan] Item entry." ) );
+			if ( !rc )
+				fprintf( f, "P|%s|%s|%s|%s|%d\n", group, title, command, icon, index );
+		}
+	}
+	if ( fclose( f ) )
+		fail( T( "TaskPlanError", "Cannot write the plan for Windows." ) );
+}
+
+/* plain DOS with registry entries: GDIPOST.EXE (this installer) applies
+ * REGISTRY.PLN, or restores REGISTRY.LOG after INSTALL /U (UNINST.PND),
+ * when Windows starts the next time (run= in WIN.INI) */
+static void post_runner( int add )
+{
+	char from[80], to[80];
+	path_cat( to, dest, "GDIPOST.EXE" );
+	if ( add ) {
+		path_cat( from, srcdir, "INSTALL.EXE" );
+		if ( stricmp( from, to ) && copy_file( from, to ) ) {
+			char msg[160];
+			sprintf( msg, "%s %s -> %s", T( "CopyError", "Cannot copy" ), from, to );
+			fail( msg );
+		}
+	}
+	winini_run( add, to );
+	if ( !add )
+		remove( to );
+}
+
+static void deferred_registry( void )
+{
+	char p[80];
+	FILE *f;
+	if ( !registry_deferred )
+		return;
+	post_runner( 1 );
+	path_cat( p, dest, "INSTALL.LOG" );   /* INSTALL /U removes it */
+	if ( ( f = fopen( p, "a" ) ) != NULL ) {
+		path_cat( p, dest, "GDIPOST.EXE" );
+		fprintf( f, "%s\n", p );
+		fclose( f );
+	}
+}
+
+/* INSTALL /U in plain DOS: 1 = the registry is restored later by GDIPOST */
+static int uninstall_registry( void )
+{
+	char p[80];
+	FILE *f;
+	if ( frontend() )
+		return 0;
+	path_cat( p, dest, "REGISTRY.PLN" );
+	remove( p );   /* never applied */
+	path_cat( p, dest, "REGISTRY.LOG" );
+	if ( !file_exists( p ) ) {
+		if ( *windir )
+			post_runner( 0 );
+		return 0;
+	}
+	path_cat( p, dest, "UNINST.PND" );
+	if ( !( f = fopen( p, "w" ) ) || fclose( f ) )
+		fail( T( "WriteError", "Cannot write" ) );
+	post_runner( 1 );
+	return 1;
 }
 
 /* --- setup steps ------------------------------------------------------ */
@@ -1564,6 +1894,7 @@ static void ask_options( void )
 
 static void ask_dirs( void )
 {
+	const char *value;
 	strcpy( dest, ini_get( "Setup", "DefaultDir", "C:\\PROGRAM" ) );
 	expand( dest, dest, sizeof(dest) );
 	scr_keys( T( "KeysInput", "Enter=Continue  Esc=Abort" ) );
@@ -1578,8 +1909,9 @@ static void ask_dirs( void )
 		}
 	}
 	find_dest();
-	if ( has_entry( "System.ini", "Add" ) ||
-		has_entry( "System.ini", "Set" ) || hexpatch_needs_windows() ) {
+	if ( has_entry( "System.ini", "Add" ) || has_entry( "System.ini", "Set" ) ||
+		has_entry( "Win.ini", "Set" ) || has_progman() ||
+		ini_lines( "Registry", 0, &value ) >= 0 || hexpatch_needs_windows() ) {
 		find_windows();
 		if ( scr_input( T( "WinTitle", "Windows" ),
 			T( "WinText", "Windows directory for the SYSTEM.INI entries (empty: no Windows):" ), windir, 64 ) )
@@ -1633,6 +1965,25 @@ static int confirm( void )
 					sprintf( text + strlen( text ), "SYSTEM.INI [%.*s]: %s\n",
 						(int)( strchr( t, '|' ) - t ), t, line );
 			}
+	}
+	if ( windir[0] ) {
+		pos = 0;
+		while ( ( pos = ini_next( "Win.ini", "Set", pos, &v ) ) >= 0 )
+			if ( ( t = cond( v ) ) != NULL && strchr( t, '|' ) ) {
+				expand( line, strchr( t, '|' ) + 1, sizeof(line) );
+				if ( strlen( text ) + strlen( line ) + 40 < sizeof(text) )
+					sprintf( text + strlen( text ), "WIN.INI [%.*s]: %s\n",
+						(int)( strchr( t, '|' ) - t ), t, line );
+			}
+		pos = 0;
+		while ( ( pos = ini_next( "ProgMan", "Item", pos, &v ) ) >= 0 ) {
+			static char group[80], title[80], command[128], icon[128];
+			int index;
+			if ( !progman_item( v, group, title, command, icon, &index ) &&
+				strlen( text ) + strlen( group ) + strlen( title ) + 40 < sizeof(text) )
+				sprintf( text + strlen( text ), "%s %s: %s\n",
+					T( "SumProgMan", "Program Manager" ), group, title );
+		}
 	}
 	for ( key = 0; key < 2; key++ )
 		for ( pos = 0; ( pos = ini_next( "HexPatch", patch_keys[key], pos,
@@ -1722,9 +2073,79 @@ int gdi_ask_disk( int n )
 	return rc != 0;
 }
 
+/* INSTALL.LOG: one line per installed file, "path|backup" when an existing
+ * file was replaced (INSTALL /U puts the backup back).  The lines of an
+ * earlier installation into the same directory are kept: a file installed
+ * again keeps its first backup, so the original is restored. */
+#define MAXOLD 800
+static char __far *old_log[MAXOLD];   /* far heap: a log can be long */
+static int nold;
+
+static void old_log_load( const char *path )
+{
+	FILE *f = fopen( path, "r" );
+	char l[180];
+	nold = 0;
+	if ( !f )
+		return;
+	while ( nold < MAXOLD && fgets( l, sizeof(l), f ) ) {
+		char __far *p;
+		strip_eol( l );
+		if ( !*l || !( p = _fmalloc( strlen( l ) + 1 ) ) )
+			continue;
+		_fstrcpy( p, l );
+		old_log[nold++] = p;
+	}
+	fclose( f );
+}
+
+/* the old line for path (up to '|'), or -1 */
+static int old_log_find( const char *path )
+{
+	int i, n = strlen( path );
+	for ( i = 0; i < nold; i++ ) {
+		const char __far *l = old_log[i];
+		int k;
+		if ( !l )
+			continue;
+		for ( k = 0; k < n && l[k] && toupper( (unsigned char)l[k] ) == toupper( (unsigned char)path[k] ); k++ );
+		if ( k == n && ( !l[k] || l[k] == '|' ) )
+			return i;
+	}
+	return -1;
+}
+
+/* the lines of the old log that were not installed again */
+static void old_log_flush( void )
+{
+	int i;
+	for ( i = 0; i < nold; i++ )
+		if ( old_log[i] ) {
+			if ( logf )
+				fprintf( logf, "%Fs\n", old_log[i] );
+			_ffree( old_log[i] );
+			old_log[i] = NULL;
+		}
+	nold = 0;
+}
+
+/* before a file is written: log it, keep the file it replaces */
 static void log_file( const char *path )
 {
-	if ( logf )
+	char saved[80];
+	int i;
+	if ( !logf )
+		return;
+	if ( ( i = old_log_find( path ) ) >= 0 ) {
+		fprintf( logf, "%Fs\n", old_log[i] );
+		_ffree( old_log[i] );
+		old_log[i] = NULL;
+		return;
+	}
+	backup_as( path, saved );
+	if ( *saved )
+		fprintf( logf, "%s|%s\n", path, saved );
+	else
 		fprintf( logf, "%s\n", path );
 }
 
@@ -1799,6 +2220,7 @@ static void copy_all( void )
 	progtitle = T( "CopyTitle", "Copying files" );
 	if ( unin ) {
 		path_cat( to, dest, "INSTALL.LOG" );
+		old_log_load( to );
 		logf = fopen( to, "w" );
 	}
 	/* [Dirs]: directories to create (cond|path) */
@@ -1828,24 +2250,24 @@ static void copy_all( void )
 		file_target( t, name, to );
 		make_parent( to );
 		scr_progress( progtitle, name, ++done, total );
+		log_file( to );
 		if ( copy_file( from, to ) ) {
 			char msg[160];
 			sprintf( msg, "%s %s -> %s", T( "CopyError", "Cannot copy" ), from, to );
 			fail( msg );
 		}
-		log_file( to );
 	}
 	/* [Find] files from the installation disk that are used */
 	for ( i = 0; i < nfind; i++ )
 		if ( finds[i].file[0] && find_used( finds[i].name ) ) {
 			path_cat( from, srcdir, finds[i].file );
 			scr_progress( progtitle, finds[i].file, done, total );
+			log_file( finds[i].path );
 			if ( copy_file( from, finds[i].path ) ) {
 				char msg[160];
 				sprintf( msg, "%s %s -> %s", T( "CopyError", "Cannot copy" ), from, finds[i].path );
 				fail( msg );
 			}
-			log_file( finds[i].path );
 		}
 	if ( unin ) {
 		/* INSTALL /U in the target directory removes the installation */
@@ -1877,6 +2299,7 @@ static void copy_all( void )
 			fail( msg );
 		}
 	}
+	old_log_flush();
 	if ( logf ) {
 		fclose( logf );
 		logf = NULL;
@@ -1891,7 +2314,7 @@ static int run_program( const char *cmdline )
 	scr_exit();
 	rc = spawn_program( cmdline );
 	scr_init();
-	scr_bars( ini_get( "Setup", "Title", "Setup" ), ini_get( "Setup", "Product", "GeosOne DOS Installer" ), "" );
+	scr_bars( ini_get( "Setup", "Title", "Setup" ), ini_get( "Setup", "Product", "GeosOne Dual Installer" ), "" );
 	scr_desktop();
 	return rc;
 }
@@ -1919,6 +2342,9 @@ static void edit_all( void )
 		path_cat( p, windir, "SYSTEM.INI" );
 		if ( file_exists( p ) )
 			edit_file( p, "System.ini", 2 );
+		path_cat( p, windir, "WIN.INI" );
+		if ( !frontend() && file_exists( p ) )
+			edit_file( p, "Win.ini", 3 );
 	}
 }
 
@@ -1926,7 +2352,7 @@ static void remove_all( void )
 {
 	const char *v, *t;
 	char p[80], name[40];
-	int pos = 0;
+	int pos = 0, had_log = 0, pending;
 	static const char *b[2];
 	b[0] = T( "Remove", "Remove" );
 	b[1] = T( "Cancel", "Cancel" );
@@ -1939,14 +2365,29 @@ static void remove_all( void )
 	find_windows();
 	patch_all();
 	edit_all();
+	progman_undo();
+	pending = uninstall_registry();
 	path_cat( p, dest, "INSTALL.LOG" );
 	if ( ( logf = fopen( p, "r" ) ) != NULL ) {
-		/* the files installed (from archives: also below %DIR%) */
-		char l[90];
+		/* the files installed (from archives: also below %DIR%); a
+		 * replaced file comes back from its backup */
+		char l[180];
+		had_log = 1;
 		while ( fgets( l, sizeof(l), logf ) ) {
-			char *e = strchr( l, '\n' ), *b;
-			if ( e )
-				*e = 0;
+			char *e, *b;
+			strip_eol( l );
+			if ( ( e = strchr( l, '|' ) ) != NULL ) {
+				*e++ = 0;
+				if ( file_exists( e ) ) {
+					remove( l );
+					if ( rename( e, l ) && !copy_file( e, l ) )
+						remove( e );
+				}
+				continue;
+			}
+			path_cat( p, dest, "GDIPOST.EXE" );
+			if ( pending && !stricmp( l, p ) )
+				continue;   /* runs at the next start of Windows */
 			remove( l );
 			while ( ( b = strrchr( l, '\\' ) ) != NULL && b - l > 2 && stricmp( l, dest ) ) {
 				*b = 0;
@@ -1956,10 +2397,11 @@ static void remove_all( void )
 		}
 		fclose( logf );
 		logf = NULL;
+		path_cat( p, dest, "INSTALL.LOG" );
 		remove( p );
 	}
 	pos = 0;
-	while ( ( pos = ini_lines( "Files", pos, &v ) ) >= 0 ) {
+	while ( !had_log && ( pos = ini_lines( "Files", pos, &v ) ) >= 0 ) {
 		const char *eq;
 		t = strchr( v, '|' ) ? strchr( v, '|' ) + 1 : v;
 		if ( strchr( t, '*' ) )
@@ -1972,7 +2414,7 @@ static void remove_all( void )
 			path_cat( p, dest, name );
 		remove( p );
 	}
-	if ( !keep_uninstaller ) {
+	if ( !keep_uninstaller && !pending ) {
 		path_cat( p, dest, "INSTALL.INI" );
 		remove( p );
 		path_cat( p, dest, "INSTALL.EXE" );
@@ -2160,6 +2602,7 @@ static void install_steps( void )
 	scr_desktop();
 	if ( registry_write_plan( registry_error ) )
 		fail( registry_error );
+	task_write_plan();
 	if ( !confirm() )
 		abort_setup();
 	scr_desktop();
@@ -2168,6 +2611,8 @@ static void install_steps( void )
 	write_language();
 	patch_all();
 	edit_all();
+	progman_all();
+	deferred_registry();
 	run_all( "After" );
 }
 
@@ -2186,7 +2631,7 @@ static void use_ini( const char *dir )
 	find_files();
 	detect_all();
 	read_options();
-	scr_bars( ini_get( "Setup", "Title", "Setup" ), ini_get( "Setup", "Product", "GeosOne DOS Installer" ), "" );
+	scr_bars( ini_get( "Setup", "Title", "Setup" ), ini_get( "Setup", "Product", "GeosOne Dual Installer" ), "" );
 	scr_desktop();
 }
 
@@ -2273,7 +2718,7 @@ static void finish( void )
 
 static void usage( void )
 {
-	printf( "GeosOne DOS Installer " GDI_VERSION " - GNU GPL version 3\n"
+	printf( "GeosOne Dual Installer " GDI_VERSION " - GNU GPL version 3\n"
 	        "INSTALL [/U] [/B:d:] [/O:bits] [/W:status] [file.INI]\n"
 	        "  installs as described by INSTALL.INI next to INSTALL.EXE\n"
 	        "  /U    removes the installation (run INSTALL.EXE in the target directory)\n"
@@ -2283,6 +2728,7 @@ static void usage( void )
 	        "  /W:   write completion status for the Windows setup frontend\n"
 	        "  /R:   write its expanded registry plan (internal)\n"
 	        "  /F:   registry family: 31 or 9X (internal)\n"
+	        "  /T:   write the WIN.INI and Program Manager plan (internal)\n"
 	        "  /K    keep the uninstaller until native cleanup (internal)\n" );
 }
 
@@ -2316,6 +2762,8 @@ int main( int argc, char **argv )
 					atexit( write_completion );
 					completion_registered = 1;
 				}
+			} else if ( toupper( argv[i][1] ) == 'T' && argv[i][2] == ':' && argv[i][3] ) {
+				sprintf( task_plan_file, "%.79s", argv[i] + 3 );
 			} else if ( toupper( argv[i][1] ) == 'R' && argv[i][2] == ':' && argv[i][3] ) {
 				sprintf( registry_plan_file, "%.79s", argv[i] + 3 );
 			} else if ( toupper( argv[i][1] ) == 'F' && argv[i][2] == ':' ) {
@@ -2374,9 +2822,11 @@ int main( int argc, char **argv )
 	detect_all();
 
 	scr_init();
-	scr_bars( ini_get( "Setup", "Title", "Setup" ), ini_get( "Setup", "Product", "GeosOne DOS Installer" ), "" );
+	scr_bars( ini_get( "Setup", "Title", "Setup" ), ini_get( "Setup", "Product", "GeosOne Dual Installer" ), "" );
 	scr_desktop();
 	read_options();
+	if ( !stricmp( ini_get( "Setup", "Windows", "yes" ), "no" ) && windows_running() )
+		fail( T( "NeedDos", "Please quit Windows and run this setup from MS-DOS." ) );
 	if ( uninstall )
 		remove_all();
 	else {

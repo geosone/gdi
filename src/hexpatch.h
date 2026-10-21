@@ -1,4 +1,4 @@
-/* hexpatch.h - checked binary patching for GeosOne DOS Installer
+/* hexpatch.h - checked binary patching for GeosOne Dual Installer
  * Copyright (C) 2026 GeosOne.  GNU General Public License version 3. */
 
 #ifndef GDI_HEXPATCH_H
