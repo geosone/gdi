@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <malloc.h>
 #include "gdi.h"
 
 #define MAXLINES 400
@@ -148,16 +149,17 @@ int ini_lines( const char *section, int pos, const char **l )
 }
 
 /* text file as an array of lines (tabs expanded); NULL if not found */
-char **text_load( const char *path, int *nlines )
+ftext *text_load( const char *path, int *nlines )
 {
 	FILE *f = fopen( path, "r" );
-	char buf[200], **l;
+	char buf[200];
+	ftext *l;
 	int n = 0, max = 64;
 	if ( !f )
 		return NULL;
-	l = malloc( max * sizeof(char *) );
+	l = _fmalloc( max * sizeof(char __far *) );
 	while ( l && fgets( buf, sizeof(buf), f ) ) {
-		char out[200];
+		char out[200], __far *p;
 		int i, o = 0;
 		for ( i = 0; buf[i] && buf[i] != '\n' && buf[i] != '\r' && buf[i] != 0x1A && o < 190; i++ )
 			if ( buf[i] == '\t' )
@@ -168,21 +170,28 @@ char **text_load( const char *path, int *nlines )
 				out[o++] = buf[i];
 		out[o] = 0;
 		if ( n == max ) {
-			char **t = realloc( l, ( max *= 2 ) * sizeof(char *) );
+			ftext *t = _frealloc( l, ( max *= 2 ) * sizeof(char __far *) );
 			if ( !t )
 				break;
 			l = t;
 		}
-		l[n++] = str_dup( out );
+		if ( !( p = _fmalloc( o + 1 ) ) )
+			break;
+		_fstrcpy( p, out );
+		l[n++] = p;
+	}
+	if ( l && !feof( f ) ) {        /* out of memory: no half license */
+		text_free( l, n );
+		l = NULL;
 	}
 	fclose( f );
 	*nlines = n;
 	return l;
 }
 
-void text_free( char **l, int n )
+void text_free( ftext *l, int n )
 {
 	while ( n )
-		free( l[--n] );
-	free( l );
+		_ffree( l[--n] );
+	_ffree( l );
 }

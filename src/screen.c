@@ -89,6 +89,12 @@ void scr_putn( int x, int y, int attr, const char *s, int n )
 		vram[y * COLS + x] = ( attr << 8 ) | (unsigned char)( *s ? *s++ : ' ' );
 }
 
+void scr_putnf( int x, int y, int attr, const char __far *s, int n )
+{
+	for ( ; n > 0 && x < COLS; n--, x++ )
+		vram[y * COLS + x] = ( attr << 8 ) | (unsigned char)( *s ? *s++ : ' ' );
+}
+
 void scr_fill( int x, int y, int w, int h, int ch, int attr )
 {
 	int i, j;
@@ -302,14 +308,14 @@ int scr_input( const char *title, const char *text, char *buf, int max )
 }
 
 /* text viewer (license, readme); returns the button chosen or -1 */
-int scr_view( const char *title, char **lines, int nlines, const char **buttons, int n, int sel )
+int scr_view( const char *title, ftext *lines, int nlines, const char **buttons, int n, int sel )
 {
 	int x = 2, y = 2, w = COLS - 4, h = ROWS - 4, top = 0, k, i;
 	int vis = h - 5;
 	scr_window( x, y, w, h, A_WIN, title );
 	for ( ;; ) {
 		for ( i = 0; i < vis; i++ )
-			scr_putn( x + 2, y + 1 + i, A_WINTXT, top + i < nlines ? lines[top + i] : "", w - 4 );
+			scr_putnf( x + 2, y + 1 + i, A_WINTXT, top + i < nlines ? lines[top + i] : (const char __far *)"", w - 4 );
 		{
 			char pos[24];
 			int pct = nlines > vis ? (int)( ( (long)( top + vis ) * 100 ) / nlines ) : 100;

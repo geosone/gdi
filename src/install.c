@@ -1381,14 +1381,16 @@ static void find_dest( void )
 
 static void show_text( const char *title, const char *file, const char **buttons, int n, int must )
 {
-	char p[80], **l;
+	char p[80];
+	ftext *l;
 	int nl, rc;
 	path_cat( p, srcdir, file );
 	if ( !file_exists( p ) && *dest )   /* the disk may have been changed */
 		path_cat( p, dest, file );
 	if ( !( l = text_load( p, &nl ) ) ) {
 		char msg[120];
-		sprintf( msg, "%s %s", T( "MissingFile", "File not found:" ), p );
+		sprintf( msg, "%s %s", file_exists( p ) ? T( "NoMemory", "Not enough memory for" )
+		                                        : T( "MissingFile", "File not found:" ), p );
 		fail( msg );
 	}
 	scr_keys( T( "KeysView", "PgUp=Page up  PgDn=Page down  Enter=Select  Esc=Abort" ) );
