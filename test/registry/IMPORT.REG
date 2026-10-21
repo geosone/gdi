@@ -1,0 +1,5 @@
+REGEDIT
+; imported by [Registry] Import=
+HKEY_CLASSES_ROOT\GDIRegistryImport = GDI import
+HKEY_CLASSES_ROOT\GDIRegistryImport\CLSID = {00000000-0000-0000-0000-000000000001}
+HKEY_CLASSES_ROOT\GDIRegistryImport\NoValue

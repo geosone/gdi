@@ -1,10 +1,13 @@
 #!/bin/bash
 # [Win.ini], [ProgMan], [Registry] and replaced files in Windows 3.x (plain
-# DOS): installs test/TESTPM.INI from DOS, starts Windows (GDIPOST.EXE
+# DOS): installs test/TESTPM.INI from DOS, starts Windows (the runner GDIPxxxx.EXE
 # applies the registry plan), removes it again with INSTALL /U from DOS and
-# starts Windows again (GDIPOST.EXE restores the registry).  Screens and the
+# starts Windows again (the runner restores the registry).  Screens and the
 # changed files go to build/win3x.
 #   test/win3x.sh
+# Windows is ended cleanly by test/exitwin/EXITWIN.EXE (WfW 3.11 writes its
+# disk cache and WIN.INI only then); at the end the registry must contain the
+# package entries ([Registry] Set= and Import=) and be as before after /U.
 # Environment: WIN311IMG (a hard disk image with Windows 3.1x in C:\WINDOWS,
 # FAT partition at sector 63, AUTOEXEC.BAT is replaced), TIMEOUT
 set -uo pipefail
@@ -22,9 +25,16 @@ echo 'GDI test readme' | crlf > "$OUT/src/README.TXT"
 echo 'setting=default' | crlf > "$OUT/src/PMTEST.CFG"
 echo 'replaced by GDI' | crlf > "$OUT/src/REPL.TXT"
 echo 'original file' | crlf > "$OUT/ORIG.TXT"
+printf 'REGEDIT\n; [Registry] Import=\nHKEY_CLASSES_ROOT\\GdiTestFile = GDI Testdatei\nHKEY_CLASSES_ROOT\\GdiTestFile\\shell\\open\\command = notepad.exe %%1\nHKEY_CLASSES_ROOT\\GdiTestFile\\NoValue\n' | crlf > "$OUT/src/PMTEST.REG"
+(
+    export WATCOM=${WATCOM:-/opt/watcom}; export INCLUDE="$WATCOM/h:$WATCOM/h/win" PATH="$WATCOM/binl64:$PATH"
+    cd "$OUT" && wcc -q -bt=windows -ms -0 -os -zq -fo=EXITWIN.OBJ "$ROOT/test/exitwin/EXITWIN.C" &&
+        wlink option quiet system windows option stack=4k,heapsize=1k name EXITWIN.EXE file EXITWIN.OBJ
+) || exit 1
 mmd -i "$P" ::/SRC 2>/dev/null
 mcopy -o -i "$P" "$OUT"/src/* ::/SRC/ || exit 1
 mcopy -o -i "$P" "$OUT/ORIG.TXT" ::/WINDOWS/REPL.TXT
+mcopy -o -i "$P" "$OUT/EXITWIN.EXE" ::/
 
 # one run: AUTOEXEC.BAT = $1 (| separated), keys, screens $2-N.png
 run() {
@@ -44,6 +54,7 @@ fetch() {
     mcopy -o -i "$P" "::/WINDOWS/*.GRP" "$d/" 2>/dev/null
     mcopy -o -s -i "$P" "::/PMTEST" "$d/" 2>/dev/null
 }
+fetch 0-before
 
 if [ -n "${UPDATE:-}" ]; then
     # version 2.0 over 1.0: the files are replaced, a changed settings file
@@ -72,19 +83,35 @@ if [ -n "${UPDATE:-}" ]; then
 elif [ -n "${FRONTEND:-}" ]; then
     # the same from the Win16 frontend: WIN.INI and the groups through
     # Windows (profile functions, DDE), the registry right away
-    W='@ECHO OFF|PATH C:\;C:\WINDOWS|C:\WINDOWS\WIN'
-    run "$W C:\SRC\INSTALL.EXE" install "ret ret ret ret ret ret ret ret"
+    W='@ECHO OFF|PATH C:\;C:\WINDOWS|C:\WINDOWS\WIN C:\EXITWIN.EXE 100'
+    TIMEOUT=${TIMEOUT:-80} run "$W C:\SRC\INSTALL.EXE" install "ret ret ret ret ret ret ret ret"
     fetch 1-installed
-    run "$W C:\PMTEST\INSTALL.EXE /U" uninst "ret r ret ret"
+    TIMEOUT=${TIMEOUT:-80} run "$W C:\PMTEST\INSTALL.EXE /U" uninst "ret r ret ret"
     fetch 2-removed
+    INSTALLED=1-installed REMOVED=2-removed
 else
     run 'C:\SRC\INSTALL.EXE' install "ret ret ret ret ret ret ret"
     fetch 1-installed
-    run '@ECHO OFF|PATH C:\;C:\WINDOWS|C:\WINDOWS\WIN' windows ""
+    run '@ECHO OFF|PATH C:\;C:\WINDOWS|C:\WINDOWS\WIN C:\EXITWIN.EXE 30' windows ""
     fetch 2-windows
     run 'C:\PMTEST\INSTALL.EXE /U' uninst "r ret ret ret"
     fetch 3-removed
-    run '@ECHO OFF|PATH C:\;C:\WINDOWS|C:\WINDOWS\WIN' windows2 ""
+    run '@ECHO OFF|PATH C:\;C:\WINDOWS|C:\WINDOWS\WIN C:\EXITWIN.EXE 30' windows2 ""
     fetch 4-windows
+    INSTALLED=2-windows REMOVED=4-windows
 fi
 ls -R "$OUT/files"
+if [ -z "${UPDATE:-}" ]; then
+    # the registry: the package entries while installed, as before after /U
+    cd "$OUT/files"
+    "$ROOT/test/regdat.py" "$INSTALLED/REG.DAT" > installed.reg
+    for k in '.gdt = GdiTestFile' 'GdiTestFile = GDI Testdatei' 'GdiTestFile\shell\open\command = notepad.exe %1'; do
+        grep -qxF ".classes\\$k" installed.reg || { echo "registry entry missing: $k"; exit 1; }
+    done
+    diff <("$ROOT/test/regdat.py" 0-before/REG.DAT) <("$ROOT/test/regdat.py" "$REMOVED/REG.DAT") ||
+        { echo "registry not restored"; exit 1; }
+    # -B: Windows writes a blank line before a new section and keeps it
+    # when the profile functions remove the section again
+    diff -B <(tr -d '\r' < 0-before/WIN.INI) <(tr -d '\r' < "$REMOVED/WIN.INI") || { echo "WIN.INI not restored"; exit 1; }
+    echo "Windows registry and WIN.INI integration passed"
+fi
