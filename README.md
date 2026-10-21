@@ -182,6 +182,27 @@ Windows, `GDIPOST.EXE` applies the plan and removes itself from `run=`.
 `INSTALL /U` from DOS works the other way round: it leaves `UNINST.PND`, and
 `GDIPOST.EXE` restores `REGISTRY.LOG` and removes the directory.
 
+**Updates:** an installation that can be removed again (`Uninstall=yes`) is
+entered in `%BOOT%\GDI.INI` (`[Installed] Id=directory|options|version`;
+`[Setup] Id=` defaults to `Product=`, `[Setup] Version=` is shown). When the
+package is installed again, Setup (DOS engine and Win16 frontend) finds that
+entry and offers an update of that directory with the options chosen then.
+An update only replaces the files: `CONFIG.SYS`, `AUTOEXEC.BAT`, `SYSTEM.INI`,
+`WIN.INI`, the Program Manager groups, the registry and binary patches stay as
+they are, including manual changes. The settings files of the program are not
+overwritten either:
+
+```ini
+[Keep]
+CALMIRA.INI
+1|DATA\*.DAT
+```
+
+A pattern without a path is a file name, one with a path is below `%DIR%` (or
+a full path). Without `[Keep]`, existing `*.INI` and `*.CFG` files are kept.
+`INSTALL.LOG` keeps the first backups, so `INSTALL /U` still restores the
+original files; it also removes the entry from `GDI.INI`.
+
 **DOS only:** `[Setup] Windows=no` refuses to run under Windows (DOS engine
 and Win16 frontend, text `[Text] NeedDos`), for packages that replace files
 Windows has open.
@@ -324,9 +345,10 @@ the Win16 NE portion into the final `INSTALL.EXE`. Intermediate files remain in
 | `make test-host` | binary-patch checks, registry plan/type/journal validation and Program Manager group files |
 | `test/run.sh` | installation |
 | `WINDOWS=1 HEXPATCH=1 INI=test/TESTHEX.INI test/run.sh` | DOS binary-patch integration (add `TARGET=TESTHEX UNINST=1` for reverse) |
-| `UNINST=1 test/run.sh` | installation and `INSTALL /U` |
+| `KEYS="ret ret ret ret ret ret ret ret ret" UNKEYS="r ret ret ret" UNINST=1 test/run.sh` | installation and `INSTALL /U` |
 | `MENU=1 WINDOWS=1 INI=test/TESTWIN.INI test/run.sh` | multi-configuration `CONFIG.SYS` and `SYSTEM.INI` |
 | `test/win3x.sh` | `[Win.ini]`, `[ProgMan]`, `[Registry]` and replaced files from plain DOS, then Windows 3.11 (`GDIPOST.EXE`), uninstall and Windows again (`WIN311IMG`) |
+| `UPDATE=1 test/win3x.sh` | version 2.0 over 1.0 with a changed settings file and WIN.INI value, then uninstall (add `FRONTEND=1 START=25 STEP=4` for the frontend) |
 | `FRONTEND=1 START=25 STEP=4 test/win3x.sh` | the same through the Win16 frontend (profile functions, DDE) |
 | `PKG=dir TARGET=NAME test/run.sh` | the distribution in `dir` (its `INSTALL.INI`), target `A:\NAME` |
 

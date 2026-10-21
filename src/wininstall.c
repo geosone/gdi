@@ -12,6 +12,7 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <direct.h>
+#include <dos.h>
 #include "gdi.h"
 #include "regtxn.h"
 #include "winreg16.h"
@@ -28,6 +29,8 @@ static HWND install_window;
 static HWND cancel_window;
 static HFONT ui_font;
 static int option_count;
+static int update_mode;   /* %BOOT%\GDI.INI lists an earlier installation */
+static void find_update( void );
 static int has_automatic;
 static int win9x;
 static int engine_running;
@@ -364,6 +367,42 @@ static void read_package( void )
         sprintf( option_label[option_count], "%.*s", length, bar );
         option_count++;
     }
+    find_update();
+}
+
+/* the same check as the DOS engine (find_update): the options of the
+ * earlier installation are kept, only its files are replaced */
+static void find_update( void )
+{
+    char record[16], key[64], value[160], ini[100], *bits, *version;
+    union REGS r;
+    int i;
+    if ( stricmp( ini_get( "Setup", "Uninstall", "yes" ), "yes" ) )
+        return;
+    r.x.ax = 0x3305;   /* boot drive */
+    intdos( &r, &r );
+    wsprintf( record, "%c:\\GDI.INI", 'A' + ( r.h.dl ? r.h.dl : 3 ) - 1 );
+    ini_package_id( key, sizeof(key) );
+    WritePrivateProfileString( NULL, NULL, NULL, record );   /* no cached copy */
+    GetPrivateProfileString( "Installed", key, "", value, sizeof(value), record );
+    if ( !( bits = strchr( value, '|' ) ) )
+        return;
+    *bits++ = 0;
+    if ( ( version = strchr( bits, '|' ) ) != NULL )
+        *version++ = 0;
+    path_cat( ini, value, "INSTALL.INI" );
+    if ( !file_exists( ini ) )
+        return;
+    update_mode = 1;
+    has_automatic = 0;
+    for ( i = 0; i < option_count && bits[i]; i++ )
+        option_on[i] = bits[i] == '1';
+    sprintf( welcome_text, ini_get( "Text", "UpdateText",
+             "%s is already installed in %s. Setup replaces its files; the system settings and the settings files of the program stay as they are." ),
+             product, value );
+    if ( version && *version )
+        sprintf( welcome_text + strlen( welcome_text ), " (%s %.20s)",
+                 ini_get( "Text", "UpdateOld", "Installed version:" ), version );
 }
 
 static int registry_preflight( char *message )
@@ -511,10 +550,13 @@ static long FAR PASCAL window_proc( HWND window, UINT message,
                                               option_count > 8 ? 258 : 520,
                                               20, ID_OPTION + i );
             SendMessage( option_window[i], BM_SETCHECK, option_on[i], 0L );
+            if ( update_mode )
+                EnableWindow( option_window[i], FALSE );
         }
         button_y = 154 + group_height;
         install_window = make_control( window, "BUTTON",
                       uninstall_mode ? ini_get( "Text", "Remove", "Remove" ) :
+                      update_mode ? ini_get( "Text", "Update", "Update" ) :
                       ini_get( "Text", "Install", "Start setup" ),
                       BS_DEFPUSHBUTTON | WS_TABSTOP, 350, button_y,
                       100, 26, ID_INSTALL );
@@ -569,7 +611,8 @@ static long FAR PASCAL window_proc( HWND window, UINT message,
                     else if ( !registry_failed )
                         delete_uninstaller();
                 } else {
-                    if ( !win9x && *registry_plan_path )
+                    /* an update leaves no plans */
+                    if ( !win9x && *registry_plan_path && file_exists( registry_plan_path ) )
                         registry_failed = gdi_reg16_apply_plan(
                             registry_plan_path, registry_error,
                             sizeof(registry_error) );

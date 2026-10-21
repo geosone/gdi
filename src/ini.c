@@ -195,3 +195,16 @@ void text_free( ftext *l, int n )
 		_ffree( l[--n] );
 	_ffree( l );
 }
+
+/* the name of the package in the list of installations (%BOOT%\GDI.INI):
+ * [Setup] Id=, else Product= */
+void ini_package_id( char *out, unsigned size )
+{
+	const char *id = ini_get( "Setup", "Id", NULL );
+	unsigned i;
+	if ( !id )
+		id = ini_get( "Setup", "Product", "Package" );
+	for ( i = 0; id[i] && i + 1 < size; i++ )
+		out[i] = id[i] == '=' || id[i] == '[' || id[i] == ';' ? '_' : id[i];
+	out[i] = 0;
+}

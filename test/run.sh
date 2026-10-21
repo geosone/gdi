@@ -68,9 +68,9 @@ if [ -n "${HEXPATCH:-}" ]; then
     mcopy -o -i "$P" "$OUT/WIN386.EXE" "$OUT/NDIS.386" ::/WINDOWS/SYSTEM/
 fi
 DEFAULT_KEYS="ret ret ret ret ret ret ret ret ret"
-[ -n "${UNINST:-}" ] && DEFAULT_KEYS="ret ret ret ret ret ret ret ret ret"
+[ -n "${UNINST:-}" ] && DEFAULT_KEYS="ret ret ret ret ret ret"
 KEYS=${KEYS:-$DEFAULT_KEYS}
-[ -n "${UNINST:-}" ] && KEYS="$KEYS ${UNKEYS:-r ret ret ret}"
+[ -n "${UNINST:-}" ] && KEYS="$KEYS ${UNKEYS:-r}"
 {
     sleep ${START:-8}; n=0
     for k in $KEYS; do n=$((n+1)); echo "screendump $OUT/s$n.ppm"; sleep 1; echo "sendkey $k"; sleep 2; done

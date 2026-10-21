@@ -50,6 +50,8 @@ static struct {
 } detects[MAXDETECT];   /* [Detect]: external program returned zero */
 static int ndetect;
 static FILE *logf;
+static int update_mode;          /* an earlier installation is updated */
+static char old_version[24];
 static const char *gdi_self;           /* argv[0] */
 static char completion_file[80];       /* /W:path: Win16 completion status */
 static char registry_plan_file[80];    /* /R:path: expanded native plan */
@@ -1929,6 +1931,13 @@ static int confirm( void )
 	int key, pos;
 	b[0] = T( "Install", "Install" );
 	b[1] = T( "Cancel", "Cancel" );
+	if ( update_mode ) {
+		b[0] = T( "Update", "Update" );
+		sprintf( text, "%s %s\n\n%s", T( "SumUpdateFiles", "Update the files in:" ), dest,
+			T( "SumUpdateKeep", "CONFIG.SYS, AUTOEXEC.BAT, SYSTEM.INI, WIN.INI, the Program Manager groups and the settings files of the program stay as they are." ) );
+		scr_keys( T( "KeysMsg", "Enter=Select  Esc=Abort" ) );
+		return scr_message( T( "SumUpdateTitle", "Ready to update" ), text, b, 2, 0, 0 ) == 0;
+	}
 	sprintf( text, "%s %s\n", T( "SumFiles", "Files to:" ), dest );
 	pos = 0;
 	while ( ( pos = ini_next( "Config.sys", "Add", pos, &v ) ) >= 0 )
@@ -2073,14 +2082,197 @@ int gdi_ask_disk( int n )
 	return rc != 0;
 }
 
-/* INSTALL.LOG: one line per installed file, "path|backup" when an existing
- * file was replaced (INSTALL /U puts the backup back).  The lines of an
- * earlier installation into the same directory are kept: a file installed
- * again keeps its first backup, so the original is restored. */
+/* --- updates ------------------------------------------------------------ */
+
 #define MAXOLD 800
 static char __far *old_log[MAXOLD];   /* far heap: a log can be long */
 static int nold;
 
+
+/* %BOOT%\GDI.INI [Installed] lists every installation that can be removed
+ * again (Uninstall=yes): Id=directory|options|version.  Setup finds an
+ * earlier installation of the package there and updates it: only the files
+ * are replaced.  CONFIG.SYS, AUTOEXEC.BAT, SYSTEM.INI, WIN.INI, the groups,
+ * the registry and the package's settings files ([Keep]) stay as they are. */
+
+static void record_path( char *p )
+{
+	sprintf( p, "%s\\GDI.INI", boot );
+}
+
+static int record_read( char *dir, char *bits, char *version )
+{
+	char p[80], l[200], key[64];
+	FILE *f;
+	int in = 0, n, found = 0;
+	record_path( p );
+	ini_package_id( key, sizeof(key) );
+	n = strlen( key );
+	if ( !( f = fopen( p, "r" ) ) )
+		return 0;
+	while ( !found && fgets( l, sizeof(l), f ) ) {
+		strip_eol( l );
+		if ( *l == '[' )
+			in = !strnicmp( l, "[Installed]", 11 );
+		else if ( in && !strnicmp( l, key, n ) && l[n] == '=' ) {
+			char *a = l + n + 1, *b, *c;
+			if ( ( b = strchr( a, '|' ) ) != NULL )
+				*b++ = 0;
+			else
+				b = a + strlen( a );
+			if ( ( c = strchr( b, '|' ) ) != NULL )
+				*c++ = 0;
+			else
+				c = b + strlen( b );
+			sprintf( dir, "%.79s", a );
+			sprintf( bits, "%.16s", b );
+			sprintf( version, "%.23s", c );
+			found = 1;
+		}
+	}
+	fclose( f );
+	return found;
+}
+
+/* enter (add) or remove this installation in GDI.INI */
+static void record_write( int add )
+{
+	char p[80], t[80], l[200], key[64], bits[MAXOPT + 1];
+	FILE *in, *out;
+	int n, i, section = 0, done = !add;
+	record_path( p );
+	strcpy( t, p );
+	strcpy( t + strlen( t ) - 3, "$$$" );
+	ini_package_id( key, sizeof(key) );
+	n = strlen( key );
+	for ( i = 0; i < nopt; i++ )
+		bits[i] = opt_on[i] ? '1' : '0';
+	bits[nopt] = 0;
+	in = fopen( p, "r" );
+	if ( !in && !add )
+		return;
+	if ( !( out = fopen( t, "w" ) ) ) {
+		if ( in )
+			fclose( in );
+		return;
+	}
+	while ( in && fgets( l, sizeof(l), in ) ) {
+		strip_eol( l );
+		if ( *l == '[' ) {
+			if ( section && !done ) {
+				fprintf( out, "%s=%s|%s|%s\n", key, dest, bits, ini_get( "Setup", "Version", "" ) );
+				done = 1;
+			}
+			section = !strnicmp( l, "[Installed]", 11 );
+		} else if ( section && !strnicmp( l, key, n ) && l[n] == '=' )
+			continue;
+		fprintf( out, "%s\n", l );
+	}
+	if ( !done ) {
+		if ( !section )
+			fprintf( out, "[Installed]\n" );
+		fprintf( out, "%s=%s|%s|%s\n", key, dest, bits, ini_get( "Setup", "Version", "" ) );
+	}
+	if ( in )
+		fclose( in );
+	if ( fclose( out ) ) {
+		remove( t );
+		return;
+	}
+	remove( p );
+	rename( t, p );
+}
+
+/* an earlier installation of this package: ask, then update it */
+static void find_update( void )
+{
+	static const char *b[2];
+	static char text[500];
+	char dir[80], bits[MAXOPT + 1], p[80];
+	const char *version = ini_get( "Setup", "Version", "" );
+	int i;
+	update_mode = 0;
+	if ( dosmode || stricmp( ini_get( "Setup", "Uninstall", "yes" ), "yes" ) ||
+		!record_read( dir, bits, old_version ) )
+		return;
+	path_cat( p, dir, "INSTALL.INI" );
+	if ( !file_exists( p ) )
+		return;
+	sprintf( text, T( "UpdateText", "%s is already installed in %s. Setup replaces its files; the system settings and the settings files of the program stay as they are." ),
+		ini_get( "Setup", "Product", "The software" ), dir );
+	if ( *old_version || *version )
+		sprintf( text + strlen( text ), "\n\n%s %s\n%s %s",
+			T( "UpdateOld", "Installed version:" ), *old_version ? old_version : "?",
+			T( "UpdateNew", "New version:" ), *version ? version : "?" );
+	b[0] = T( "Update", "Update" );
+	b[1] = T( "Cancel", "Cancel" );
+	scr_desktop();
+	scr_keys( T( "KeysMsg", "Enter=Select  Esc=Abort" ) );
+	if ( scr_message( T( "UpdateTitle", "Update" ), text, b, 2, 0, 0 ) != 0 )
+		abort_setup();
+	update_mode = 1;
+	strcpy( dest, dir );
+	find_dest();
+	for ( i = 0; i < nopt && bits[i]; i++ )
+		opt_on[i] = bits[i] == '1';
+}
+
+static int wild_match( const char *p, const char *s )
+{
+	for ( ; *p; p++, s++ ) {
+		if ( *p == '*' ) {
+			for ( ;; s++ ) {
+				if ( wild_match( p + 1, s ) )
+					return 1;
+				if ( !*s )
+					return 0;
+			}
+		}
+		if ( !*s || ( *p != '?' && toupper( (unsigned char)*p ) != toupper( (unsigned char)*s ) ) )
+			return 0;
+	}
+	return !*s;
+}
+
+static int old_log_find( const char *path );
+
+/* update: an existing settings file stays ([Keep] cond|pattern; a pattern
+ * without a path is a file name, else a path below %DIR% or a full path;
+ * without [Keep]: *.INI and *.CFG).  Its log line is kept. */
+static int keep_file( const char *path )
+{
+	const char *v, *t, *name = strrchr( path, '\\' );
+	char pat[80];
+	int pos = 0, n = strlen( dest ), any = 0, keep = 0, i;
+	name = name ? name + 1 : path;
+	if ( !update_mode || !file_exists( path ) )
+		return 0;
+	while ( !keep && ( pos = ini_lines( "Keep", pos, &v ) ) >= 0 ) {
+		any = 1;
+		if ( ( t = cond( v ) ) == NULL )
+			continue;
+		expand( pat, t, sizeof(pat) );
+		if ( pat[1] == ':' )
+			keep = wild_match( pat, path );
+		else if ( strchr( pat, '\\' ) )
+			keep = !strnicmp( path, dest, n ) && path[n] == '\\' && wild_match( pat, path + n + 1 );
+		else
+			keep = wild_match( pat, name );
+	}
+	if ( !any )
+		keep = wild_match( "*.INI", name ) || wild_match( "*.CFG", name );
+	if ( keep && logf && ( i = old_log_find( path ) ) >= 0 ) {
+		fprintf( logf, "%Fs\n", old_log[i] );
+		_ffree( old_log[i] );
+		old_log[i] = NULL;
+	}
+	return keep;
+}
+
+/* INSTALL.LOG: one line per installed file, "path|backup" when an existing
+ * file was replaced (INSTALL /U puts the backup back).  The lines of an
+ * earlier installation into the same directory are kept: a file installed
+ * again keeps its first backup, so the original is restored. */
 static void old_log_load( const char *path )
 {
 	FILE *f = fopen( path, "r" );
@@ -2204,6 +2396,8 @@ static int arc_target( const char *name, char *path )
 	while ( ( pos = ini_lines( "Files", pos, &v ) ) >= 0 )
 		if ( ( t = cond( v ) ) != NULL && file_target( t, name, path ) ) {
 			make_parent( path );
+			if ( keep_file( path ) )
+				return -1;
 			log_file( path );
 			return 0;
 		}
@@ -2250,6 +2444,8 @@ static void copy_all( void )
 		file_target( t, name, to );
 		make_parent( to );
 		scr_progress( progtitle, name, ++done, total );
+		if ( keep_file( to ) )
+			continue;
 		log_file( to );
 		if ( copy_file( from, to ) ) {
 			char msg[160];
@@ -2414,6 +2610,7 @@ static void remove_all( void )
 			path_cat( p, dest, name );
 		remove( p );
 	}
+	record_write( 0 );
 	if ( !keep_uninstaller && !pending ) {
 		path_cat( p, dest, "INSTALL.INI" );
 		remove( p );
@@ -2592,27 +2789,34 @@ static void install_steps( void )
 {
 	char registry_error[130];
 	welcome();
+	find_update();
 	license();
 	scr_desktop();
-	ask_dirs();
-	scr_desktop();
-	ask_options();
-	scr_desktop();
-	ask_language();
-	scr_desktop();
-	if ( registry_write_plan( registry_error ) )
-		fail( registry_error );
-	task_write_plan();
+	if ( !update_mode ) {
+		ask_dirs();
+		scr_desktop();
+		ask_options();
+		scr_desktop();
+		ask_language();
+		scr_desktop();
+		if ( registry_write_plan( registry_error ) )
+			fail( registry_error );
+		task_write_plan();
+	}
 	if ( !confirm() )
 		abort_setup();
 	scr_desktop();
 	run_all( "Before" );
 	copy_all();
-	write_language();
-	patch_all();
-	edit_all();
-	progman_all();
-	deferred_registry();
+	if ( !update_mode ) {   /* an update keeps the system settings */
+		write_language();
+		patch_all();
+		edit_all();
+		progman_all();
+		deferred_registry();
+	}
+	if ( !stricmp( ini_get( "Setup", "Uninstall", "yes" ), "yes" ) )
+		record_write( 1 );
 	run_all( "After" );
 }
 

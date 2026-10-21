@@ -19,6 +19,7 @@ cp "$ROOT/build/INSTALL.EXE" "$OUT/src/"
 cp "$ROOT/test/TESTPM.INI" "$OUT/src/INSTALL.INI"
 printf '\xcd\x20' > "$OUT/src/TESTTOOL.COM"
 echo 'GDI test readme' | crlf > "$OUT/src/README.TXT"
+echo 'setting=default' | crlf > "$OUT/src/PMTEST.CFG"
 echo 'replaced by GDI' | crlf > "$OUT/src/REPL.TXT"
 echo 'original file' | crlf > "$OUT/ORIG.TXT"
 mmd -i "$P" ::/SRC 2>/dev/null
@@ -44,7 +45,31 @@ fetch() {
     mcopy -o -s -i "$P" "::/PMTEST" "$d/" 2>/dev/null
 }
 
-if [ -n "${FRONTEND:-}" ]; then
+if [ -n "${UPDATE:-}" ]; then
+    # version 2.0 over 1.0: the files are replaced, a changed settings file
+    # and the system settings stay
+    run 'C:\SRC\INSTALL.EXE' install "ret ret ret ret ret ret ret"
+    echo 'setting=changed by the user' | crlf > "$OUT/PMTEST.CFG"
+    mcopy -o -i "$P" "$OUT/PMTEST.CFG" ::/PMTEST/
+    mcopy -o -i "$P" ::/WINDOWS/WIN.INI "$OUT/WIN.INI"
+    sed -i 's/^Value=installed/Value=changed by the user/' "$OUT/WIN.INI"
+    mcopy -o -i "$P" "$OUT/WIN.INI" ::/WINDOWS/
+    fetch 1-installed
+    sed -i 's/^Version=1.0/Version=2.0/' "$OUT/src/INSTALL.INI"
+    echo 'GDI test readme 2.0' | crlf > "$OUT/src/README.TXT"
+    echo 'setting=default 2.0' | crlf > "$OUT/src/PMTEST.CFG"
+    mcopy -o -i "$P" "$OUT"/src/* ::/SRC/
+    if [ -n "${FRONTEND:-}" ]; then
+        run '@ECHO OFF|PATH C:\;C:\WINDOWS|C:\WINDOWS\WIN C:\SRC\INSTALL.EXE' update "ret ret ret ret ret ret"
+    else
+        run 'C:\SRC\INSTALL.EXE' update "ret ret ret ret ret"
+    fi
+    fetch 2-updated
+    mcopy -o -i "$P" ::/GDI.INI "$OUT/files/2-updated/" 2>/dev/null
+    run 'C:\PMTEST\INSTALL.EXE /U' uninst "r ret ret ret"
+    fetch 3-removed
+    mcopy -o -i "$P" ::/GDI.INI "$OUT/files/3-removed/" 2>/dev/null
+elif [ -n "${FRONTEND:-}" ]; then
     # the same from the Win16 frontend: WIN.INI and the groups through
     # Windows (profile functions, DDE), the registry right away
     W='@ECHO OFF|PATH C:\;C:\WINDOWS|C:\WINDOWS\WIN'
