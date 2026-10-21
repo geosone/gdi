@@ -29,6 +29,7 @@ All of them are in the target directory (`%DIR%`):
 | `PROGMAN.LOG` | the created groups (`G|group`) and added items (`I|group|title`) |
 | `REGISTRY.LOG` | the previous state of every registry key and value changed |
 | `REGISTRY.PLN`, `UNINST.PND` | registry work left for the next Windows start |
+| `RUNONCE.PLN` | the `[Run] Windows=` programs left for the next Windows start |
 
 A value or line changed by the user after the installation is kept: the
 uninstaller restores only what is still as Setup left it. A registry key or

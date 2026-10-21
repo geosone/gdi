@@ -52,6 +52,10 @@ the plan as `%DIR%\REGISTRY.PLN`, copies itself to `%DIR%\GDIPxxxx.EXE` (the
 runner) and adds that to `run=` in `WIN.INI`. On the next start of Windows,
 the runner applies the plan and removes itself from `run=`.
 
+The programs of `[Run] Windows=` go the same way: from plain DOS the engine
+writes them to `%DIR%\RUNONCE.PLN`, and the runner starts them once after
+the registry work.
+
 `INSTALL /U` from DOS works the other way round: it leaves `UNINST.PND`, and
 the runner restores `REGISTRY.LOG` and removes the directory.
 

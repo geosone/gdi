@@ -104,6 +104,11 @@ ls -R "$OUT/files"
 if [ -z "${UPDATE:-}" ]; then
     # the registry: the package entries while installed, as before after /U
     cd "$OUT/files"
+    # [Run] Windows=: from DOS RUNONCE.PLN, started by the runner
+    if [ "$INSTALLED" = 2-windows ]; then
+        [ -f 1-installed/PMTEST/RUNONCE.PLN ] || { echo "RUNONCE.PLN missing"; exit 1; }
+        [ ! -f 2-windows/PMTEST/RUNONCE.PLN ] || { echo "RUNONCE.PLN not started"; exit 1; }
+    fi
     "$ROOT/test/regdat.py" "$INSTALLED/REG.DAT" > installed.reg
     for k in '.gdt = GdiTestFile' 'GdiTestFile = GDI Testdatei' 'GdiTestFile\shell\open\command = notepad.exe %1'; do
         grep -qxF ".classes\\$k" installed.reg || { echo "registry entry missing: $k"; exit 1; }

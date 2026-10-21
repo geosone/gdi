@@ -1743,8 +1743,9 @@ static void progman_undo( void )
 }
 
 /* started by the frontend: the WIN.INI values and the items it applies,
- * "GDI-TASK-PLAN 1", Dir=, WinDir=, then "W|section|key=value" and
- * "P|group|title|command|icon|index" (expanded, ANSI) */
+ * "GDI-TASK-PLAN 1", Dir=, WinDir=, then "W|section|key=value",
+ * "P|group|title|command|icon|index", "R|runner" and "U|runner" (run=) and
+ * "X|program" ([Run] Windows=) (expanded, ANSI) */
 static int task_plan_started;
 
 static void task_write_plan( void )
@@ -1784,6 +1785,22 @@ static void task_write_plan( void )
 		fail( T( "TaskPlanError", "Cannot write the plan for Windows." ) );
 }
 
+static void task_plan_line( char kind, const char *text )
+{
+	char line[160];
+	FILE *f = fopen( task_plan_file, task_plan_started ? "a" : "w" );
+	if ( !f )
+		fail( T( "TaskPlanError", "Cannot write the plan for Windows." ) );
+	if ( !task_plan_started )
+		fprintf( f, "GDI-TASK-PLAN 1\nDir=%s\nWinDir=%s\n", dest, windir );
+	task_plan_started = 1;
+	sprintf( line, "%.159s", text );
+	gdi_pm_oem_to_ansi( line );
+	fprintf( f, "%c|%s\n", kind, line );
+	if ( fclose( f ) )
+		fail( T( "TaskPlanError", "Cannot write the plan for Windows." ) );
+}
+
 /* the copy of this installer that does the registry work at the next start
  * of Windows (run= in WIN.INI).  Windows 3.x starts a file name only once (a
  * second GDIPOST.EXE would become an instance of the first, with its file
@@ -1814,28 +1831,23 @@ static void post_runner( int add )
 			fail( msg );
 		}
 	}
-	if ( frontend() && *task_plan_file ) {
-		/* Windows runs: the frontend changes run= (R|program) */
-		FILE *f = fopen( task_plan_file, task_plan_started ? "a" : "w" );
-		if ( !f )
-			fail( T( "TaskPlanError", "Cannot write the plan for Windows." ) );
-		if ( !task_plan_started )
-			fprintf( f, "GDI-TASK-PLAN 1\nDir=%s\nWinDir=%s\n", dest, windir );
-		task_plan_started = 1;
-		fprintf( f, "%c|%s\n", add ? 'R' : 'U', to );
-		fclose( f );
-	} else
+	if ( frontend() && *task_plan_file )
+		task_plan_line( add ? 'R' : 'U', to );   /* the frontend changes run= */
+	else
 		winini_run( add, to );
 	if ( !add )
 		remove( to );
 }
 
-static void deferred_registry( void )
+/* the runner of this package directory, in run= and INSTALL.LOG */
+static void add_runner( void )
 {
+	static char added_for[80];
 	char p[80];
 	FILE *f;
-	if ( !registry_deferred )
+	if ( !stricmp( added_for, dest ) )
 		return;
+	strcpy( added_for, dest );
 	post_runner( 1 );
 	path_cat( p, dest, "INSTALL.LOG" );   /* INSTALL /U removes it */
 	if ( ( f = fopen( p, "a" ) ) != NULL ) {
@@ -1845,11 +1857,52 @@ static void deferred_registry( void )
 	}
 }
 
+static void deferred_registry( void )
+{
+	if ( registry_deferred )
+		add_runner();
+}
+
+/* [Run] Windows=cond|program: started once under Windows after setup, by
+ * the frontend right away, from plain DOS by the runner at the next start
+ * of Windows (RUNONCE.PLN) */
+static void run_windows( void )
+{
+	const char *v, *t;
+	char command[160], p[80];
+	FILE *f = NULL;
+	int pos = 0;
+	if ( !*windir )
+		return;
+	while ( ( pos = ini_next( "Run", "Windows", pos, &v ) ) >= 0 ) {
+		if ( ( t = cond( v ) ) == NULL )
+			continue;
+		expand( command, t, sizeof(command) );
+		if ( frontend() && *task_plan_file ) {
+			task_plan_line( 'X', command );
+			continue;
+		}
+		if ( !f ) {
+			path_cat( p, dest, "RUNONCE.PLN" );
+			if ( !( f = fopen( p, "w" ) ) )
+				fail( T( "WriteError", "Cannot write" ) );
+		}
+		fprintf( f, "%s\n", command );
+	}
+	if ( f ) {
+		if ( fclose( f ) )
+			fail( T( "WriteError", "Cannot write" ) );
+		add_runner();
+	}
+}
+
 /* INSTALL /U in plain DOS: 1 = the registry is restored later by the runner */
 static int uninstall_registry( void )
 {
 	char p[80];
 	FILE *f;
+	path_cat( p, dest, "RUNONCE.PLN" );
+	remove( p );   /* [Run] Windows= never started */
 	if ( frontend() )
 		return 0;
 	path_cat( p, dest, "REGISTRY.PLN" );
@@ -3256,6 +3309,7 @@ static void install_steps( void )
 	if ( !stricmp( ini_get( "Setup", "Uninstall", "yes" ), "yes" ) )
 		record_write( 1 );
 	run_all( "After" );
+	run_windows();
 }
 
 /* the INI (already loaded) of srcdir dir becomes the current one */

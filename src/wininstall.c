@@ -562,6 +562,22 @@ static int post_tasks( const char *post )
         MessageBox( NULL, error, "GDI", MB_OK | MB_ICONEXCLAMATION );
         return 2;
     }
+    path_cat( path, source_dir, "RUNONCE.PLN" );   /* [Run] Windows= */
+    {
+        FILE *f = fopen( path, "r" );
+        char command[160];
+        if ( f ) {
+            while ( fgets( command, sizeof(command), f ) ) {
+                command[strcspn( command, "\r\n" )] = 0;
+                if ( *command ) {
+                    OemToAnsi( command, command );
+                    gdi_tasks_start( command );
+                }
+            }
+            fclose( f );
+            delete_file( path );
+        }
+    }
     gdi_tasks_run( post, 0 );
     return 0;
 }

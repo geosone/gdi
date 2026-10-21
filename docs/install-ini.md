@@ -55,6 +55,7 @@ ROOT\*=%BOOT%\                  ; ... to another directory
 
 [Run]                           ; programs to run before / after copying
 Before=SYS.COM %BOOT%
+Windows=%DIR%\SETUP.EXE          ; once under Windows after setup
 
 [Config.sys]
 Remove=AHCIASPI.SYS             ; lines containing this text are removed first
@@ -175,8 +176,13 @@ Windows directory and its `COMMAND`, `%BOOT%\` and the paths named in
 
 A copied file that replaces an existing one outside `%DIR%` is kept as a
 backup (see [Uninstall and updates](uninstall-update.md)). `[Dirs]` creates
-directories, `[Run] Before=` and `After=` run programs before and after
+directories, `[Run] Before=` and `After=` run DOS programs before and after
 copying.
+
+`[Run] Windows=condition|program` starts a Windows program once after setup,
+for example the own setup of a package (Internet Explorer). Under Windows the
+frontend starts it when setup has finished; from plain DOS the runner starts
+it at the next start of Windows (see [Windows](windows.md)).
 
 ## Variables
 

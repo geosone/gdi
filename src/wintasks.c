@@ -150,6 +150,17 @@ static int restore_values( const char *dir, char *error, unsigned size )
 	return 0;
 }
 
+/* a program of [Run] Windows=; a program that does not start does not undo
+ * the installation, it is only reported */
+void gdi_tasks_start( const char *command )
+{
+	char text[200];
+	if ( WinExec( command, SW_SHOWNORMAL ) < 32 ) {
+		sprintf( text, "Cannot start %.160s", command );
+		MessageBox( NULL, text, "GDI", MB_OK | MB_ICONEXCLAMATION );
+	}
+}
+
 /* --- Program Manager (DDE) --------------------------------------------- */
 
 static HDDEDATA CALLBACK dde_callback( UINT type, UINT format, HCONV conv,
@@ -349,7 +360,9 @@ int gdi_tasks_apply( const char *plan_path, char *error, unsigned size )
 			items = NULL;
 			sprintf( dir, "%.127s", line + 4 );
 		} else if ( ( line[0] == 'R' || line[0] == 'U' ) && line[1] == '|' )
-			gdi_tasks_run( line + 2, line[0] == 'R' );   /* GDIPOST.EXE */
+			gdi_tasks_run( line + 2, line[0] == 'R' );   /* the runner */
+		else if ( line[0] == 'X' && line[1] == '|' )
+			gdi_tasks_start( line + 2 );   /* [Run] Windows= */
 		else if ( line[0] == 'W' && line[1] == '|' )
 			failed = apply_value( dir, line, error, size );
 		else if ( line[0] == 'P' && line[1] == '|' ) {

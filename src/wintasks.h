@@ -9,5 +9,7 @@ int gdi_tasks_apply( const char *plan_path, char *error, unsigned size );
 int gdi_tasks_restore( const char *dir, char *error, unsigned size );
 /* add (1) or remove (0) a program in run= of [windows] in WIN.INI */
 void gdi_tasks_run( const char *program, int add );
+/* starts a program of [Run] Windows= */
+void gdi_tasks_start( const char *command );
 
 #endif
