@@ -383,6 +383,7 @@ static void find_update( void )
     intdos( &r, &r );
     wsprintf( record, "%c:\\GDI.INI", 'A' + ( r.h.dl ? r.h.dl : 3 ) - 1 );
     ini_package_id( key, sizeof(key) );
+    AnsiToOem( key, key );   /* GDI.INI is written by the DOS engine */
     WritePrivateProfileString( NULL, NULL, NULL, record );   /* no cached copy */
     GetPrivateProfileString( "Installed", key, "", value, sizeof(value), record );
     if ( !( bits = strchr( value, '|' ) ) )
@@ -393,6 +394,7 @@ static void find_update( void )
     path_cat( ini, value, "INSTALL.INI" );
     if ( !file_exists( ini ) )
         return;
+    OemToAnsi( value, value );
     update_mode = 1;
     has_automatic = 0;
     for ( i = 0; i < option_count && bits[i]; i++ )

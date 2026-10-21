@@ -149,6 +149,11 @@ still unchanged; a later administrator change is preserved. Duplicate existing
 keys and malformed journal data are rejected. This is suitable for reversible
 shell selection, for example `Set=3|boot|shell=%DIR%\CALMIRA.EXE`.
 
+**SYSTEM.INI lines:** `[System.ini] Add=condition|section|line` adds a line
+(for example `device=vshare.386`) only when the section does not have it yet.
+The lines actually added are recorded in `%DIR%\SYSTEM.ADD`, and
+`INSTALL /U` removes exactly these, so a line that was there before stays.
+
 **WIN.INI values:** `[Win.ini]` takes the same `Set=condition|section|key=value`
 lines as `[System.ini]` and journals them in `%DIR%\WIN.SET` (same format as
 `SYSTEM.SET`). In plain DOS the engine edits `WIN.INI` itself; under Windows,
@@ -173,7 +178,8 @@ created group, `I|group|title` for an added item), and `INSTALL /U` removes
 those items and the created groups once they are empty.
 
 Texts in `INSTALL.INI` are in the DOS code page (850); `[Win.ini]` and
-`[ProgMan]` texts are converted to ANSI for Windows.
+`[ProgMan]` texts are converted to ANSI for Windows, and so is everything the
+Win16 frontend shows.
 
 **Windows-only work from DOS:** registry entries cannot be written from plain
 DOS. The engine then stores the plan as `%DIR%\REGISTRY.PLN`, copies itself to

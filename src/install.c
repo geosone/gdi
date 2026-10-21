@@ -755,12 +755,29 @@ static void ed_add_dos( const char *section, int isconfig )
 	}
 }
 
-/* SYSTEM.INI: Add=cond|Section|line */
+/* the line of section (header "[name]") equal to text, or -1 */
+static int ini_find_line( const char *hdr, const char *text )
+{
+	int i, in = 0;
+	for ( i = 0; i < ned; i++ ) {
+		if ( ed[i][0] == '[' )
+			in = !strnicmp( ed[i], hdr, strlen( hdr ) );
+		else if ( in && !stricmp( ed[i], text ) )
+			return i;
+	}
+	return -1;
+}
+
+/* SYSTEM.INI: Add=cond|Section|line.  A line that is already there is not
+ * added again (device=vshare.386, for example); the lines added are kept in
+ * %DIR%\SYSTEM.ADD ("section|line"), and INSTALL /U removes just these. */
 static void ed_add_ini( void )
 {
 	const char *v, *t;
-	char sec[40], line[256], hdr[44];
+	char sec[40], line[256], hdr[44], journal[80];
 	int pos = 0, i;
+	FILE *f = NULL;
+	path_cat( journal, dest, "SYSTEM.ADD" );
 	while ( ( pos = ini_next( "System.ini", "Add", pos, &v ) ) >= 0 ) {
 		const char *bar;
 		if ( !( t = cond_new( "System.ini", "Add", v ) ) || !( bar = strchr( t, '|' ) ) )
@@ -768,6 +785,14 @@ static void ed_add_ini( void )
 		sprintf( sec, "%.*s", (int)( bar - t ), t );
 		expand( line, bar + 1, sizeof(line) );
 		sprintf( hdr, "[%s]", sec );
+		if ( ini_find_line( hdr, line ) >= 0 )
+			continue;
+		if ( !f && !( f = fopen( journal, "a" ) ) ) {
+			char msg[120];
+			sprintf( msg, "%s %s", T( "WriteError", "Cannot write" ), journal );
+			fail( msg );
+		}
+		fprintf( f, "%s|%s\n", sec, line );
 		for ( i = 0; i < ned && strnicmp( ed[i], hdr, strlen( hdr ) ); i++ );
 		if ( i == ned ) {
 			ed_insert( ned, "" );
@@ -780,6 +805,30 @@ static void ed_add_ini( void )
 			i--;
 		ed_insert( i, line );
 	}
+	if ( f )
+		fclose( f );
+}
+
+/* INSTALL /U: remove the lines of SYSTEM.ADD; 1 = there was a journal */
+static int ed_unadd_ini( void )
+{
+	char journal[80], l[300], hdr[44], *bar;
+	FILE *f;
+	int i;
+	path_cat( journal, dest, "SYSTEM.ADD" );
+	if ( !( f = fopen( journal, "r" ) ) )
+		return 0;
+	while ( fgets( l, sizeof(l), f ) ) {
+		strip_eol( l );
+		if ( !( bar = strchr( l, '|' ) ) )
+			continue;
+		*bar = 0;
+		sprintf( hdr, "[%.40s]", l );
+		if ( ( i = ini_find_line( hdr, bar + 1 ) ) >= 0 )
+			ed_delete( i );
+	}
+	fclose( f );
+	return 1;
 }
 
 /* SYSTEM.INI: Set=cond|Section|key=value.  Original values are kept in a
@@ -1269,10 +1318,15 @@ static void patch_all( void )
 static void edit_file( const char *path, const char *section, int kind )
 {
 	char set_journal_path[80];
-	int restored = 0, set_journal_exists = 0;
+	int restored = 0, set_journal_exists = 0, unadded = 0;
 	if ( kind >= 2 && uninstall ) {
 		path_cat( set_journal_path, dest, set_journal( section ) );
 		set_journal_exists = file_exists( set_journal_path );
+		if ( kind == 2 ) {
+			char added[80];
+			path_cat( added, dest, "SYSTEM.ADD" );
+			set_journal_exists |= file_exists( added );
+		}
 	}
 	if ( !has_active( section, "Add" ) && !has_active( section, "Remove" ) &&
 		!has_active( section, "Extend" ) &&
@@ -1287,6 +1341,8 @@ static void edit_file( const char *path, const char *section, int kind )
 		restored = ed_restore_ini( set_journal_path, section );
 		if ( restored < 0 )
 			fail( T( "SetRestoreError", "Cannot restore SYSTEM.INI settings." ) );
+		if ( kind == 2 )
+			unadded = ed_unadd_ini();
 	}
 	if ( !update_mode ) {   /* an update only adds the new entries */
 		ed_remove( section );
@@ -1308,6 +1364,10 @@ static void edit_file( const char *path, const char *section, int kind )
 	}
 	if ( restored > 0 )
 		remove( set_journal_path );
+	if ( unadded ) {
+		path_cat( set_journal_path, dest, "SYSTEM.ADD" );
+		remove( set_journal_path );
+	}
 	ed_free();
 }
 

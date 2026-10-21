@@ -11,6 +11,9 @@
 #include <string.h>
 #include <ctype.h>
 #include <malloc.h>
+#ifdef __WINDOWS__
+#include <windows.h>
+#endif
 #include "gdi.h"
 
 #define MAXLINES 400
@@ -81,6 +84,9 @@ int ini_load( const char *path )
 		char *s = trim( buf );
 		if ( *s == ';' || ( !*s && cur < 0 ) )
 			continue;   /* empty lines are kept for ini_text() */
+#ifdef __WINDOWS__
+		OemToAnsi( s, s );   /* INSTALL.INI is in the DOS code page */
+#endif
 		line[nline] = str_dup( s );
 		if ( *s == '[' )
 			cur = nline;
