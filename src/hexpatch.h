@@ -16,5 +16,10 @@ int hexpatch_probe( const char *path, const unsigned char *before,
 	const unsigned char *after, int length, int expected );
 int hexpatch_file( const char *path, const unsigned char *before,
 	const unsigned char *after, int length, int expected );
+/* the same; saved gets the name of the backup (NAME.Gnn), which is removed
+ * again after the change when keep is 0 */
+int hexpatch_file_ex( const char *path, const unsigned char *before,
+	const unsigned char *after, int length, int expected, char *saved,
+	int keep );
 
 #endif

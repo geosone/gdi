@@ -214,10 +214,19 @@ int hexpatch_probe( const char *path, const unsigned char *before,
 int hexpatch_file( const char *path, const unsigned char *before,
 	const unsigned char *after, int length, int expected )
 {
+	return hexpatch_file_ex( path, before, after, length, expected, NULL, 1 );
+}
+
+int hexpatch_file_ex( const char *path, const unsigned char *before,
+	const unsigned char *after, int length, int expected, char *saved,
+	int keep )
+{
 	long offsets[32];
 	char temporary[80], backup[80];
 	int result;
 
+	if ( saved )
+		*saved = 0;
 	result = inspect_patch( path, before, after, length, expected, offsets );
 	if ( result != HEXPATCH_OK )
 		return result;
@@ -238,5 +247,9 @@ int hexpatch_file( const char *path, const unsigned char *before,
 			copy_file( backup, path );
 		return HEXPATCH_IO;
 	}
+	if ( !keep )
+		remove( backup );
+	else if ( saved )
+		strcpy( saved, backup );
 	return HEXPATCH_OK;
 }

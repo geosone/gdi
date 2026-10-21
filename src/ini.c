@@ -27,6 +27,10 @@ char *str_dup( const char *s )
 	char *p = malloc( strlen( s ) + 1 );
 	if ( p )
 		strcpy( p, s );
+#ifndef __WINDOWS__
+	else
+		gdi_out_of_memory();   /* never go on with a lost line */
+#endif
 	return p;
 }
 
@@ -76,7 +80,7 @@ void ini_free( void )
 int ini_load( const char *path )
 {
 	FILE *f = fopen( path, "r" );
-	char buf[256];
+	char buf[512];   /* long [Welcome] lines */
 	int cur = -1;
 	if ( !f )
 		return -1;

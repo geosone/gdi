@@ -102,13 +102,15 @@ if [ -n "${SYSTEMSET:-}" ]; then
 fi
 if [ -n "${HEXPATCH:-}" ]; then
     mcopy -o -i "$P" ::/WINDOWS/SYSTEM/WIN386.EXE "$OUT/PATCHED.EXE"
-    mcopy -o -i "$P" ::/WINDOWS/SYSTEM/WIN386.G01 "$OUT/ORIGINAL.EXE"
     mcopy -o -i "$P" ::/WINDOWS/SYSTEM/NDIS.386 "$OUT/NDIS-PATCHED.386"
-    mcopy -o -i "$P" ::/WINDOWS/SYSTEM/NDIS.G01 "$OUT/NDIS-ORIGINAL.386"
     if [ -n "${UNINST:-}" ]; then
-        python3 -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]).read_bytes(); b=pathlib.Path(sys.argv[2]).read_bytes(); assert p.count(bytes.fromhex("66 C7 46 49 FF FF")) == 2; assert b == p' "$OUT/PATCHED.EXE" "$OUT/ORIGINAL.EXE" || exit 1
-        python3 -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]).read_bytes(); b=pathlib.Path(sys.argv[2]).read_bytes(); assert p.count(bytes.fromhex("B9 00 00 10 00 90 E2 FE CD 20 3F 00 01 00 2B C2 B9 E8 03 00 00 F7 E1 A3")) == 1; assert b == p' "$OUT/NDIS-PATCHED.386" "$OUT/NDIS-ORIGINAL.386" || exit 1
+        # the original bytes are back, the backups of the patches are gone
+        python3 -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]).read_bytes(); assert p.count(bytes.fromhex("66 C7 46 49 FF FF")) == 2 and b"\x6a\xff\x8f\x46\x49\x90" not in p' "$OUT/PATCHED.EXE" || exit 1
+        python3 -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]).read_bytes(); assert p.count(bytes.fromhex("B9 00 00 10 00 90 E2 FE CD 20 3F 00 01 00 2B C2 B9 E8 03 00 00 F7 E1 A3")) == 1' "$OUT/NDIS-PATCHED.386" || exit 1
+        ! mdir -b -i "$P" ::/WINDOWS/SYSTEM 2>/dev/null | grep -i '\.G0[0-9]$' || exit 1
     else
+        mcopy -o -i "$P" ::/WINDOWS/SYSTEM/WIN386.G01 "$OUT/ORIGINAL.EXE"
+        mcopy -o -i "$P" ::/WINDOWS/SYSTEM/NDIS.G01 "$OUT/NDIS-ORIGINAL.386"
         python3 -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]).read_bytes(); b=pathlib.Path(sys.argv[2]).read_bytes(); assert p.count(bytes.fromhex("6A FF 8F 46 49 90")) == 2; assert b.count(bytes.fromhex("66 C7 46 49 FF FF")) == 2' "$OUT/PATCHED.EXE" "$OUT/ORIGINAL.EXE" || exit 1
         python3 -c 'import pathlib,sys; p=pathlib.Path(sys.argv[1]).read_bytes(); b=pathlib.Path(sys.argv[2]).read_bytes(); assert p.count(bytes.fromhex("B9 00 00 40 06 E2 FE CD 20 3F 00 01 00 29 D0 75 01 40 6A 0A 59 F7 E1 A3")) == 1; assert b.count(bytes.fromhex("B9 00 00 10 00 90 E2 FE CD 20 3F 00 01 00 2B C2 B9 E8 03 00 00 F7 E1 A3")) == 1' "$OUT/NDIS-PATCHED.386" "$OUT/NDIS-ORIGINAL.386" || exit 1
     fi

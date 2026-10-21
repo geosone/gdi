@@ -166,6 +166,12 @@ static const char *find_path( const char *name, int n )
 static int named_result( const char *name, int n )
 {
 	int i;
+	if ( memchr( name, '\\', n ) && n < 80 ) {   /* ?%WINDIR%\NET.EXE: the file exists */
+		char raw[80], path[128];
+		sprintf( raw, "%.*s", n, name );
+		expand( path, raw, sizeof(path) );
+		return file_exists( path );
+	}
 	for ( i = 0; i < ndetect; i++ )
 		if ( (int)strlen( detects[i].name ) == n && !strnicmp( detects[i].name, name, n ) )
 			return detects[i].result != 0;
@@ -381,7 +387,7 @@ static int mkdirs( const char *path )
 static int copy_file( const char *from, const char *to )
 {
 	FILE *in = fopen( from, "rb" ), *out;
-	static char buf[4096];
+	static char buf[1024];   /* DGROUP is small */
 	size_t n;
 	if ( !in )
 		return -1;
@@ -408,6 +414,11 @@ static void fail( const char *text )
 	completion_status = 2;
 	scr_exit();
 	exit( 2 );
+}
+
+void gdi_out_of_memory( void )
+{
+	fail( T( "NoMemory", "Not enough memory." ) );
 }
 
 static void abort_setup( void )
@@ -1146,7 +1157,7 @@ static int patch_split( const char *value, char *path, char *old_hex,
 	return *end || *expected < 1 || *expected > 32 ? -1 : 0;
 }
 
-#define MAX_PATCH_VARIANTS 32
+#define MAX_PATCH_VARIANTS 16
 
 typedef struct {
 	char group[24], label[24], path[80];
@@ -1210,6 +1221,9 @@ static int hexpatch_needs_windows( void )
 	return 0;
 }
 
+static int patch_one( const char *path, const unsigned char *before,
+	const unsigned char *after, int length, int expected );
+
 static void patch_variants( void )
 {
 	static PatchVariant variants[MAX_PATCH_VARIANTS];
@@ -1268,7 +1282,7 @@ static void patch_variants( void )
 					variants[i].path );
 			fail( message );
 		}
-		result = hexpatch_file( variants[selected].path,
+		result = patch_one( variants[selected].path,
 			variants[selected].before, variants[selected].after,
 			variants[selected].length, variants[selected].expected );
 		if ( result != HEXPATCH_OK && result != HEXPATCH_ALREADY ) {
@@ -1277,6 +1291,26 @@ static void patch_variants( void )
 			fail( message );
 		}
 	}
+}
+
+/* a patch at installation: its backup goes to INSTALL.LOG, so that
+ * INSTALL /U removes it after the checked reverse patch (which keeps no
+ * backup) */
+static int patch_one( const char *path, const unsigned char *before,
+	const unsigned char *after, int length, int expected )
+{
+	char saved[80], p[80];
+	FILE *f;
+	int result = hexpatch_file_ex( path, before, after, length, expected,
+		saved, !uninstall );
+	if ( result == HEXPATCH_OK && !uninstall && *saved ) {
+		path_cat( p, dest, "INSTALL.LOG" );
+		if ( ( f = fopen( p, "a" ) ) != NULL ) {
+			fprintf( f, "%s\n", saved );
+			fclose( f );
+		}
+	}
+	return result;
 }
 
 static void patch_all( void )
@@ -1307,7 +1341,7 @@ static void patch_all( void )
 				memcpy( old_bytes, new_bytes, old_length );
 				memcpy( new_bytes, swap, old_length );
 			}
-			result = hexpatch_file( path, old_bytes, new_bytes, old_length,
+			result = patch_one( path, old_bytes, new_bytes, old_length,
 				expected );
 			if ( result == HEXPATCH_OK || result == HEXPATCH_ALREADY )
 				continue;

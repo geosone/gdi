@@ -43,6 +43,8 @@ void        ini_package_id( char *out, unsigned size );
  * fill the 64 KB data segment); NULL = file not found or not enough memory */
 ftext      *text_load( const char *path, int *nlines );
 void        text_free( ftext *lines, int nlines );
+/* DOS engine: no memory left (str_dup); does not return */
+void        gdi_out_of_memory( void );
 char       *str_dup( const char *s );
 
 /* archive.c */

@@ -131,6 +131,8 @@ accepted. A package may select at most nine licenses (`License1` through
 
 **Conditions:** `1,!2|text` means option 1 on and option 2 off; `?CDEX`
 means `[Find]` found CDEX or the `[Detect]` program named CDEX returned zero.
+`?%WINDIR%\NET.EXE` means the file exists, so
+`?%WINDIR%\NET.EXE|NET.EXE=%WINDIR%\` replaces a file only where it is installed.
 Text without a `|` always applies.
 
 **Detection programs:** `[Detect] NAME=command` is intentionally generic.
@@ -261,7 +263,7 @@ write after copying. Existing other settings are retained. `%LANGUAGE%` is
 available to commands and expanded values. The package supplies the actual
 catalogue files; this feature does not translate the installer interface.
 
-**Binary patches:** `[HexPatch]` accepts hexadecimal byte pairs separated by spaces, commas, hyphens, or nothing. The old and new signatures must have the same length (up to 32 bytes), and the last field is the exact number of expected matches. Setup refuses an unknown or ambiguous file, writes the changed file through a temporary file, and keeps the original as `.G01`, `.G02`, and so on. Re-running Setup recognizes an already patched file. `INSTALL /U` applies the checked reverse transformation. The WIN386 example is the Windows 3.1/3.11 FAT32 compatibility patch; distributors should enable it only for an appropriate DOS/Windows combination.
+**Binary patches:** `[HexPatch]` accepts hexadecimal byte pairs separated by spaces, commas, hyphens, or nothing. The old and new signatures must have the same length (up to 32 bytes), and the last field is the exact number of expected matches. Setup refuses an unknown or ambiguous file, writes the changed file through a temporary file, and keeps the original as `.G01`, `.G02`, and so on. Re-running Setup recognizes an already patched file. `INSTALL /U` applies the checked reverse transformation and removes the backup (it is listed in `INSTALL.LOG`). The WIN386 example is the Windows 3.1/3.11 FAT32 compatibility patch; distributors should enable it only for an appropriate DOS/Windows combination.
 
 `PatchIfPresent=` has the same fields and safety checks as `Patch=`, but skips
 the operation when the target file is absent. It is intended for optional
