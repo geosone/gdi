@@ -472,6 +472,32 @@ static void note_new_parents( const char *path )
 		}
 }
 
+/* a parent setup created that other packages still use: each of them (a
+ * subdirectory with INSTALL.INI and without a DIRS.LOG of its own) gets
+ * DIRS.LOG and removes the parents with its own directory later */
+static void hand_over_parents( const char *parent, const char *top )
+{
+	struct find_t found;
+	char p[80], q[80];
+	FILE *f;
+	path_cat( p, parent, "*.*" );
+	if ( _dos_findfirst( p, _A_SUBDIR, &found ) )
+		return;
+	do {
+		if ( !( found.attrib & _A_SUBDIR ) || found.name[0] == '.' )
+			continue;
+		path_cat( p, parent, found.name );
+		path_cat( q, p, "DIRS.LOG" );
+		strcat( p, "\\INSTALL.INI" );
+		if ( !file_exists( p ) || file_exists( q ) )
+			continue;
+		if ( ( f = fopen( q, "w" ) ) != NULL ) {
+			fprintf( f, "%s\n", top );
+			fclose( f );
+		}
+	} while ( !_dos_findnext( &found ) );
+}
+
 /* removes the target directory and the empty parents setup created */
 static void remove_dest_dir( void )
 {
@@ -490,6 +516,9 @@ static void remove_dest_dir( void )
 		( b = strrchr( p, '\\' ) ) != NULL && b - p > 2 &&
 		!strnicmp( p, top, strlen( top ) ) )
 		*b = 0;
+	if ( *top && stricmp( p, dest ) && file_exists( p ) &&
+		!strnicmp( p, top, strlen( top ) ) )
+		hand_over_parents( p, top );
 }
 
 static int copy_file( const char *from, const char *to )

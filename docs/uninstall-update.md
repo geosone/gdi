@@ -32,9 +32,13 @@ All of them are in the target directory (`%DIR%`):
 | `RUNONCE.PLN` | the `[Run] Windows=` programs left for the next Windows start |
 
 A value or line changed by the user after the installation is kept: the
-uninstaller restores only what is still as Setup left it. A registry key or
-parent directory that one package created and a later package also uses stays
-when the first package is removed before the later one: it is not empty yet.
+uninstaller restores only what is still as Setup left it. A registry key that
+one package created and a later package also uses stays when the first
+package is removed before the later one. A parent directory stays as well,
+but the packages still in it (a subdirectory with `INSTALL.INI` and no
+`DIRS.LOG` of its own) get the `DIRS.LOG`: the last of them removes the
+parent with its own directory, also when that happens only at the next
+Windows start (a package whose registry is restored by its runner).
 Packages removed in reverse order leave nothing behind. Setup and
 `INSTALL /U` work in plain DOS and under Windows; a package installed in one
 can be removed in the other.

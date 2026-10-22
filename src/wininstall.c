@@ -151,9 +151,36 @@ static int delete_file( const char *path )
     return !file_exists( path );
 }
 
+/* a parent setup created that other packages still use: each of them (a
+ * subdirectory with INSTALL.INI and without a DIRS.LOG of its own) gets
+ * DIRS.LOG and removes the parents with its own directory later */
+static void hand_over_parents( const char *parent, const char *top )
+{
+    struct find_t found;
+    char p[128], q[128];
+    FILE *f;
+    path_cat( p, parent, "*.*" );
+    if ( _dos_findfirst( p, _A_SUBDIR, &found ) )
+        return;
+    do {
+        if ( !( found.attrib & _A_SUBDIR ) || found.name[0] == '.' )
+            continue;
+        path_cat( p, parent, found.name );
+        path_cat( q, p, "DIRS.LOG" );
+        strcat( p, "\\INSTALL.INI" );
+        if ( !file_exists( p ) || file_exists( q ) )
+            continue;
+        if ( ( f = fopen( q, "w" ) ) != NULL ) {
+            fprintf( f, "%s\n", top );
+            fclose( f );
+        }
+    } while ( !_dos_findnext( &found ) );
+}
+
 static void delete_uninstaller( void )
 {
     char path[128], parent[128], top[128], *slash;
+    struct find_t found_dir;
     FILE *f;
     path_cat( path, source_dir, "INSTALL.INI" );
     delete_file( path );
@@ -194,6 +221,9 @@ static void delete_uninstaller( void )
             ( slash = strrchr( path, '\\' ) ) != NULL && slash - path > 2 &&
             !strnicmp( path, top, strlen( top ) ) )
         *slash = 0;
+    if ( *top && stricmp( path, source_dir ) && !strnicmp( path, top, strlen( top ) ) &&
+         !_dos_findfirst( path, _A_SUBDIR, &found_dir ) )
+        hand_over_parents( path, top );
 }
 
 /* -1 = not complete yet; 0 = success; 1 = cancelled; 2 = failed. */
