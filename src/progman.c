@@ -88,6 +88,19 @@ void gdi_pm_oem_to_ansi( char *text )
 			*p = cp850[*p - 0x80] ? cp850[*p - 0x80] : '_';
 }
 
+/* back to code page 850 (the text mode), '_' for a missing character */
+void gdi_pm_ansi_to_oem( char *text )
+{
+	unsigned char *p = (unsigned char *)text;
+	int i;
+	for ( ; *p; p++ )
+		if ( *p >= 0x80 ) {
+			for ( i = 0; i < 128 && cp850[i] != *p; i++ )
+				;
+			*p = i < 128 ? (unsigned char)( 0x80 + i ) : '_';
+		}
+}
+
 /* --- PROGMAN.INI ---------------------------------------------------------- */
 
 static char *ini[MAXINI];

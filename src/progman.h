@@ -28,5 +28,6 @@ int gdi_pm_remove_group( const char *windir, const char *group );
 
 /* Convert text from code page 850 (DOS, INSTALL.INI) to ANSI in place. */
 void gdi_pm_oem_to_ansi( char *text );
+void gdi_pm_ansi_to_oem( char *text );
 
 #endif

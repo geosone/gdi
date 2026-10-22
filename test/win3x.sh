@@ -8,6 +8,8 @@
 # Windows is ended cleanly by test/exitwin/EXITWIN.EXE (WfW 3.11 writes its
 # disk cache and WIN.INI only then); at the end the registry must contain the
 # package entries ([Registry] Set= and Import=) and be as before after /U.
+# FRONTEND=1 installs and removes from Windows (ENGINE=1: through the DOS
+# engine), UPDATE=1 updates.
 # Environment: WIN311IMG (a hard disk image with Windows 3.1x in C:\WINDOWS,
 # FAT partition at sector 63, AUTOEXEC.BAT is replaced), TIMEOUT
 set -uo pipefail
@@ -20,6 +22,8 @@ cp "$IMG" "$OUT/hd.img"; P="$OUT/hd.img@@32256"
 crlf() { sed 's/$/\r/'; }
 cp "$ROOT/build/INSTALL.EXE" "$OUT/src/"
 cp "$ROOT/test/TESTPM.INI" "$OUT/src/INSTALL.INI"
+# ENGINE=1: [Detect] needs the DOS engine, the frontend starts it
+[ -n "${ENGINE:-}" ] && printf '\r\n[Detect]\r\nGDITRUE=TESTTOOL.COM\r\n' >> "$OUT/src/INSTALL.INI"
 printf '\xcd\x20' > "$OUT/src/TESTTOOL.COM"
 echo 'GDI test readme' | crlf > "$OUT/src/README.TXT"
 echo 'setting=default' | crlf > "$OUT/src/PMTEST.CFG"
@@ -83,10 +87,19 @@ if [ -n "${UPDATE:-}" ]; then
 elif [ -n "${FRONTEND:-}" ]; then
     # the same from the Win16 frontend: WIN.INI and the groups through
     # Windows (profile functions, DDE), the registry right away
+    # the same from Windows: the installer core runs in the frontend with
+    # windows of its own (ENGINE=1: the frontend's window, then the DOS
+    # engine); WIN.INI and the groups through Windows (profile functions,
+    # DDE), the registry right away
     W='@ECHO OFF|PATH C:\;C:\WINDOWS|C:\WINDOWS\WIN C:\EXITWIN.EXE 100'
-    TIMEOUT=${TIMEOUT:-80} run "$W C:\SRC\INSTALL.EXE" install "ret ret ret ret ret ret ret ret"
+    if [ -n "${ENGINE:-}" ]; then
+        KEYS_IN="ret ret ret ret ret ret ret ret" KEYS_UN="ret r ret ret"
+    else
+        KEYS_IN="ret ret ret ret ret ret" KEYS_UN="r ret"
+    fi
+    TIMEOUT=${TIMEOUT:-80} run "$W C:\SRC\INSTALL.EXE" install "$KEYS_IN"
     fetch 1-installed
-    TIMEOUT=${TIMEOUT:-80} run "$W C:\PMTEST\INSTALL.EXE /U" uninst "ret r ret ret"
+    TIMEOUT=${TIMEOUT:-80} run "$W C:\PMTEST\INSTALL.EXE /U" uninst "$KEYS_UN"
     fetch 2-removed
     INSTALLED=1-installed REMOVED=2-removed
 else

@@ -185,7 +185,7 @@ static int pm_execute( const char *command )
 /* the text Program Manager returns for an item (group list or a group) */
 static char *pm_request( const char *item )
 {
-	HSZ name = DdeCreateStringHandle( dde_instance, item, CP_WINANSI );
+	HSZ name = DdeCreateStringHandle( dde_instance, (LPSTR)item, CP_WINANSI );
 	HDDEDATA data = DdeClientTransaction( NULL, 0, conversation, name, CF_TEXT,
 	                                      XTYP_REQUEST, 30000, NULL );
 	char *text = NULL;

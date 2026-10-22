@@ -10,7 +10,24 @@ Both parts read the same `INSTALL.INI`. Both are packed with UPX.
 
 ## The Win16 frontend
 
-The frontend reads the package title, welcome text and options from
+The installer core (the same sources as the DOS engine) also runs in the
+NE part. Under Windows it shows its steps in windows of its own: the
+welcome text, the license, the directories, the options (a list of check
+boxes), the language, the summary, a progress window and the end. The
+first letter of a button chooses it, as in the text mode. The texts of
+`INSTALL.INI` stay in the DOS code page for the files and are shown in the
+Windows code page.
+
+The registry, `WIN.INI` and the Program Manager are changed after the
+files, as described below, by the frontend itself: the core leaves them in
+the same plans as the DOS engine.
+
+### The DOS engine under Windows
+
+What Windows cannot do still goes through the DOS engine: a package (or a
+package of `[Installer]`) with `[Setup] Mode=DOS`, `[Detect]` (the exit
+status of a program) or `[Run] Before=`/`After=`. For such a package the
+frontend reads the package title, welcome text and options from
 `INSTALL.INI`, identifies the Windows family with `GetVersion`, and shows up
 to sixteen check boxes. Options whose defaults come from `[Detect]` or a
 `?` condition are shown as three-state **Automatic** choices; an unchanged

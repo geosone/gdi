@@ -35,6 +35,7 @@ FILE *logf;
 int update_mode;          /* an earlier installation is updated */
 char old_version[24];
 const char *gdi_self;           /* argv[0] */
+int in_windows;                 /* the core runs in the Windows frontend */
 char completion_file[80];       /* /W:path: Win16 completion status */
 char registry_plan_file[80];    /* /R:path: expanded native plan */
 int registry_family;            /* /F:31 or /F:9X */

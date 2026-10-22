@@ -10,10 +10,14 @@ UPX := $(UPX_BUILD)/upx
 CC   := $(WATCOM)/binl/wcc
 LINK := $(WATCOM)/binl/wlink
 COPT := -q -bt=dos -ms -0 -os -s -zq -wx -I$(WATCOM)/h
-WCOPT := -q -bt=windows -ms -0 -zW -os -s -zq -w4 -we -I$(WATCOM)/h -I$(WATCOM)/h/win
+WCOPT := -q -bt=windows -ml -zt100 -0 -zW -os -s -zq -w4 -we -I$(WATCOM)/h -I$(WATCOM)/h/win
 
-OBJS := $(addprefix $(OUT)/,dos.obj core.obj sysfiles.obj winplan.obj steps.obj files.obj dosmode.obj combined.obj util.obj journal.obj ui_dos.obj ini.obj archive.obj hexpatch.obj regtxn.obj progman.obj)
-WINOBJS := $(OUT)/wininstall.obj $(OUT)/winutil.obj $(OUT)/winjournal.obj $(OUT)/winini.obj $(OUT)/winregtxn.obj $(OUT)/winreg16.obj $(OUT)/wintasks.obj
+OBJS := $(addprefix $(OUT)/,dos.obj core.obj sysfiles.obj winplan.obj steps.obj files.obj setup.obj combined.obj dossys.obj util.obj journal.obj ui_dos.obj ini.obj archive.obj hexpatch.obj regtxn.obj progman.obj)
+# the installer core, compiled for the Windows frontend as well
+WINCORE := core sysfiles winplan steps files setup combined archive hexpatch progman
+WINOBJS := $(OUT)/wininstall.obj $(OUT)/winnative.obj $(OUT)/winsys.obj $(OUT)/ui_win16.obj \
+	$(addprefix $(OUT)/w_,$(addsuffix .obj,$(WINCORE))) \
+	$(OUT)/winutil.obj $(OUT)/winjournal.obj $(OUT)/winini.obj $(OUT)/winregtxn.obj $(OUT)/winreg16.obj $(OUT)/wintasks.obj
 DOSIMAGE := $(OUT)/INSTALL.STB
 DOSPACKED := $(OUT)/INSTALL.PST
 WINIMAGE := $(OUT)/INSTALL.UNP
@@ -48,6 +52,12 @@ $(DOSPACKED): $(DOSIMAGE) upx
 $(OUT)/wininstall.obj: src/wininstall.c src/gdi.h src/wintasks.h | $(OUT)
 	$(CC) $(WCOPT) -fo=$@ $<
 
+$(OUT)/w_%.obj: src/%.c src/gdi.h src/ui.h src/core.h src/hexpatch.h | $(OUT)
+	$(CC) $(WCOPT) -fo=$@ $<
+
+$(OUT)/winnative.obj $(OUT)/winsys.obj $(OUT)/ui_win16.obj: $(OUT)/%.obj: src/%.c src/gdi.h src/ui.h src/core.h | $(OUT)
+	$(CC) $(WCOPT) -fo=$@ $<
+
 $(OUT)/winutil.obj: src/util.c src/gdi.h | $(OUT)
 	$(CC) $(WCOPT) -fo=$@ $<
 
@@ -69,7 +79,7 @@ $(OUT)/winreg16.obj: src/winreg16.c src/winreg16.h src/regtxn.h src/gdi.h | $(OU
 $(WINIMAGE): $(DOSPACKED) $(WINOBJS)
 	$(LINK) option quiet format windows name $@ option map=$(OUT)/INSTALLW.map \
 	  $(foreach o,$(WINOBJS),file $(o)) libpath $(WATCOM)/lib286/win \
-	  libpath $(WATCOM)/lib286 library windows,shell,ddeml,clibs \
+	  libpath $(WATCOM)/lib286 library windows,shell,ddeml,clibl \
 	  option stack=8k,heapsize=4k,version=3.10 option stub=$(DOSPACKED)
 
 $(OUT)/INSTALL.EXE: $(WINIMAGE) upx

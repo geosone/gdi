@@ -1,5 +1,5 @@
-/* dosmode.c - GeosOne Dual Installer, DOS mode: hard disk, DOS itself,
- * further installations
+/* setup.c - GeosOne Dual Installer, the course of a setup: the steps of
+ * an INI, the language, further installations, core_run()
  * Copyright (C) 2026 GeosOne.  GNU General Public License version 3. */
 
 #include <stdio.h>
@@ -20,83 +20,6 @@
 #include "progman.h"
 #include "core.h"
 
-/* --- DOS mode ----------------------------------------------------------- */
-
-static int __far harderr_fail( unsigned deverr, unsigned errcode, unsigned __far *devhdr )
-{
-	(void)deverr; (void)errcode; (void)devhdr;
-	return _HARDERR_FAIL;
-}
-
-/* 0 = formatted, 1 = drive exists but is not formatted, 2 = no drive */
-static int drive_state( char d )
-{
-	union REGS r;
-	int n = toupper( d ) - 'A' + 1;
-	r.x.ax = 0x4408;   /* removable media? fails for a missing drive */
-	r.h.bl = n;
-	intdos( &r, &r );
-	if ( r.x.cflag && r.x.ax == 0x0F )
-		return 2;
-	r.h.ah = 0x36;     /* free space: fails for an unformatted drive */
-	r.h.dl = n;
-	intdos( &r, &r );
-	return r.x.ax == 0xFFFF ? 1 : 0;
-}
-
-static void reboot( void )
-{
-	union REGS r;
-	void ( __far *reset )( void ) = (void ( __far * )( void ))MK_FP( 0xFFFF, 0 );
-	r.h.ah = 0x0D;     /* flush the DOS buffers */
-	intdos( &r, &r );
-	*(unsigned short __far *)MK_FP( 0x40, 0x72 ) = 0x1234;   /* warm boot */
-	reset();
-}
-
-void ask_reboot( const char *text )
-{
-	static const char *b[1];
-	b[0] = T( "Restart", "Restart" );
-	ui_message( T( "RestartTitle", "Restart" ), text, b, 1, 0, 0 );
-	ui_exit();
-	reboot();
-}
-
-/* the hard disk: partition (FDISK, then restart) and format it */
-void dos_prepare( void )
-{
-	static const char *b[2];
-	char msg[300];
-	int st;
-	b[1] = T( "Exit", "Exit" );
-	_harderr( harderr_fail );
-	while ( ( st = drive_state( boot[0] ) ) != 0 ) {
-		ui_clear();
-		if ( st == 2 ) {
-			b[0] = T( "StartFdisk", "Start FDISK" );
-			sprintf( msg, T( "FdiskText", "There is no drive %s yet. FDISK starts now: create a primary DOS partition (and make it active), then leave FDISK. The computer restarts and Setup continues." ), boot );
-			if ( ui_message( T( "DiskSetupTitle", "Hard disk" ), msg, b, 2, 0, 0 ) )
-				abort_setup();
-			run_program( ini_get( "Setup", "Fdisk", "FDISK.EXE" ) );
-			if ( drive_state( boot[0] ) == 2 ) {
-				sprintf( msg, T( "RestartText", "The computer must restart now. Leave the setup disk in drive %c:, Setup continues afterwards." ), srcdir[0] );
-				ask_reboot( msg );
-			}
-		} else {
-			char cmd[100];
-			b[0] = T( "StartFormat", "Format" );
-			sprintf( msg, T( "FormatText", "Drive %s is not formatted yet. Format it now? All data on it is lost." ), boot );
-			if ( ui_message( T( "DiskSetupTitle", "Hard disk" ), msg, b, 2, 0, 0 ) )
-				abort_setup();
-			sprintf( cmd, "%s", ini_get( "Setup", "Format", "FORMAT.COM %BOOT%" ) );
-			run_program( cmd );
-		}
-	}
-}
-
-
-/* the setup steps of an INI (not DOS mode) */
 /* A single choice, shared by DOS setup and the Windows frontend's DOS
  * transaction. Package files, not separate executable builds, carry text. */
 void ask_language( void )
@@ -292,4 +215,67 @@ void extras( void )
 		use_ini( maindir );
 		strcpy( dest, maindest );
 	}
+}
+
+/* the whole setup of the loaded INI (srcdir, the options of the command
+ * line set); returns 0, fail() and abort_setup() do not return */
+int core_run( void )
+{
+	union REGS r;
+
+	dosmode = !stricmp( ini_get( "Setup", "Mode", "" ), "DOS" );
+	if ( dosmode && !bootset ) {
+		const char *d = ini_get( "Setup", "Drive", "C:" );
+		boot[0] = toupper( d[0] );
+	} else if ( !bootset ) {
+		r.x.ax = 0x3305;   /* boot drive */
+		intdos( &r, &r );
+		if ( r.h.dl >= 1 && r.h.dl <= 26 )
+			boot[0] = 'A' + r.h.dl - 1;
+	}
+	if ( !dosmode )
+		find_windows();
+	find_files();
+	detect_all();
+
+	ui_init();
+	ui_title( ini_get( "Setup", "Title", "Setup" ), ini_get( "Setup", "Product", "GeosOne Dual Installer" ) );
+	ui_clear();
+	read_options();
+	if ( !stricmp( ini_get( "Setup", "Windows", "yes" ), "no" ) && windows_running() )
+		fail( T( "NeedDos", "Please quit Windows and run this setup from MS-DOS." ) );
+	if ( uninstall )
+		remove_all();
+	else {
+		if ( dosmode ) {
+			welcome();
+			license();
+			dos_prepare();
+			ui_clear();
+			ask_dirs();
+			ui_clear();
+			ask_options();
+			ui_clear();
+			if ( !confirm() )
+				abort_setup();
+			ui_clear();
+			run_all( "Before" );
+			copy_all();
+			edit_all();
+			run_all( "After" );
+		} else if ( ini_get( "Installer", "Inst1", NULL ) ) {
+			welcome();
+			license();
+			ui_clear();
+			run_installers();
+		} else
+			install_steps();
+		if ( !stricmp( ini_get( "Setup", "Extras", "no" ), "yes" ) )
+			extras();
+	}
+	ui_clear();
+	finish();
+	completion_status = 0;
+	ui_exit();
+	return 0;
 }

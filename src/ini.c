@@ -21,6 +21,9 @@
 static char *line[MAXLINES];
 static int   sect[MAXLINES];     /* index of the section header line */
 static int   nline;
+#ifdef __WINDOWS__
+int ini_keep_oem;   /* the installer core: INSTALL.INI stays in the DOS code page */
+#endif
 
 char *str_dup( const char *s )
 {
@@ -89,7 +92,8 @@ int ini_load( const char *path )
 		if ( *s == ';' || ( !*s && cur < 0 ) )
 			continue;   /* empty lines are kept for ini_text() */
 #ifdef __WINDOWS__
-		OemToAnsi( s, s );   /* INSTALL.INI is in the DOS code page */
+		if ( !ini_keep_oem )
+			OemToAnsi( s, s );   /* INSTALL.INI is in the DOS code page */
 #endif
 		line[nline] = str_dup( s );
 		if ( *s == '[' )

@@ -47,7 +47,6 @@ static void usage( void )
 int main( int argc, char **argv )
 {
 	char ini[80], *s;
-	union REGS r;
 	int i;
 
 	gdi_self = argv[0];
@@ -118,59 +117,5 @@ int main( int argc, char **argv )
 			return 2;
 		}
 	}
-	dosmode = !stricmp( ini_get( "Setup", "Mode", "" ), "DOS" );
-	if ( dosmode && !bootset ) {
-		const char *d = ini_get( "Setup", "Drive", "C:" );
-		boot[0] = toupper( d[0] );
-	} else if ( !bootset ) {
-		r.x.ax = 0x3305;   /* boot drive */
-		intdos( &r, &r );
-		if ( r.h.dl >= 1 && r.h.dl <= 26 )
-			boot[0] = 'A' + r.h.dl - 1;
-	}
-	if ( !dosmode )
-		find_windows();
-	find_files();
-	detect_all();
-
-	ui_init();
-	ui_title( ini_get( "Setup", "Title", "Setup" ), ini_get( "Setup", "Product", "GeosOne Dual Installer" ) );
-	ui_clear();
-	read_options();
-	if ( !stricmp( ini_get( "Setup", "Windows", "yes" ), "no" ) && windows_running() )
-		fail( T( "NeedDos", "Please quit Windows and run this setup from MS-DOS." ) );
-	if ( uninstall )
-		remove_all();
-	else {
-		if ( dosmode ) {
-			welcome();
-			license();
-			dos_prepare();
-			ui_clear();
-			ask_dirs();
-			ui_clear();
-			ask_options();
-			ui_clear();
-			if ( !confirm() )
-				abort_setup();
-			ui_clear();
-			run_all( "Before" );
-			copy_all();
-			edit_all();
-			run_all( "After" );
-		} else if ( ini_get( "Installer", "Inst1", NULL ) ) {
-			welcome();
-			license();
-			ui_clear();
-			run_installers();
-		} else
-			install_steps();
-		if ( !stricmp( ini_get( "Setup", "Extras", "no" ), "yes" ) )
-			extras();
-	}
-	ui_clear();
-	finish();
-	completion_status = 0;
-	ui_exit();
-	return 0;
+	return core_run();
 }

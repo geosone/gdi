@@ -17,6 +17,9 @@ int         ini_next( const char *section, const char *key, int pos, const char 
 int         ini_lines( const char *section, int pos, const char **line );
 int         ini_text( const char *section, int pos, const char **line );
 void        ini_package_id( char *out, unsigned size );
+#ifdef __WINDOWS__
+extern int  ini_keep_oem;   /* do not convert INSTALL.INI to ANSI when loading */
+#endif
 /* text files: the lines are kept on the far heap (a long license must not
  * fill the 64 KB data segment); NULL = file not found or not enough memory */
 ftext      *text_load( const char *path, int *nlines );

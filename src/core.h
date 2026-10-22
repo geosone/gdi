@@ -1,5 +1,6 @@
 /* core.h - the installer core, shared by its modules (core.c, sysfiles.c,
- * winplan.c, steps.c, files.c, dosmode.c, combined.c) and dos.c
+ * winplan.c, steps.c, files.c, setup.c, combined.c), dos.c and dossys.c
+ * (DOS) or the Windows frontend with winsys.c
  * Copyright (C) 2026 GeosOne.  GNU General Public License version 3. */
 
 #define MAXOPT   16
@@ -38,6 +39,7 @@ extern FILE *logf;
 extern int update_mode;          /* an earlier installation is updated */
 extern char old_version[24];
 extern const char *gdi_self;           /* argv[0] */
+extern int in_windows;                 /* the core runs in the Windows frontend */
 extern char completion_file[80];       /* /W:path: Win16 completion status */
 extern char registry_plan_file[80];    /* /R:path: expanded native plan */
 extern int registry_family;            /* /F:31 or /F:9X */
@@ -91,7 +93,6 @@ void edit_file( const char *path, const char *section, int kind );
 
 /* winplan.c */
 int frontend( void );
-int windows_running( void );
 int progman_item( const char *value, char *group, char *title, char *command, char *icon, int *index );
 int has_progman( void );
 void progman_all( void );
@@ -105,7 +106,6 @@ int uninstall_registry( void );
 /* steps.c */
 void find_windows( void );
 void find_files( void );
-int spawn_program( const char *cmdline );
 void detect_all( void );
 void find_dest( void );
 void show_text( const char *title, const char *file, const char **buttons, int n, int must );
@@ -127,15 +127,20 @@ void run_all( const char *key );
 void edit_all( void );
 void remove_all( void );
 
-/* dosmode.c */
-void ask_reboot( const char *text );
-void dos_prepare( void );
+/* setup.c */
 void ask_language( void );
 void install_steps( void );
 void use_ini( const char *dir );
 void extras( void );
+int core_run( void );
 
 /* combined.c */
 void batch_choices( void );
 void run_installers( void );
 void finish( void );
+
+/* the platform: dossys.c (DOS) or winsys.c (the Windows frontend) */
+int spawn_program( const char *cmdline );   /* exit status, -1: not run */
+int windows_running( void );
+void ask_reboot( const char *text );        /* does not return */
+void dos_prepare( void );                   /* DOS mode: the hard disk */

@@ -171,26 +171,6 @@ void find_files( void )
 	}
 }
 
-/* Run a command line and return its exit status.  A program without a path
- * is taken from the directory containing INSTALL.EXE. */
-int spawn_program( const char *cmdline )
-{
-	char line[200], prog[80], *argv[16];
-	int argc = 0;
-	char *p;
-	expand( line, cmdline, sizeof(line) );
-	for ( p = strtok( line, " " ); p && argc < 15; p = strtok( NULL, " " ) )
-		argv[argc++] = p;
-	argv[argc] = NULL;
-	if ( !argc )
-		return -1;
-	if ( !strchr( argv[0], '\\' ) && !strchr( argv[0], ':' ) )
-		path_cat( prog, srcdir, argv[0] );
-	else
-		strcpy( prog, argv[0] );
-	return spawnv( P_WAIT, prog, (const char * const *)argv );
-}
-
 /* [Detect] NAME=program arguments: NAME becomes true when the external
  * program returns zero.  The installer has no knowledge of what it tests. */
 void detect_all( void )
@@ -547,9 +527,12 @@ int confirm( void )
 			int index;
 			if ( entry_new( "ProgMan", "Item", v ) &&
 				!progman_item( v, group, title, command, icon, &index ) &&
-				strlen( text ) + strlen( group ) + strlen( title ) + 40 < sizeof(text) )
+				strlen( text ) + strlen( group ) + strlen( title ) + 40 < sizeof(text) ) {
+				gdi_pm_ansi_to_oem( group );   /* shown as a text of the INI */
+				gdi_pm_ansi_to_oem( title );
 				sprintf( text + strlen( text ), "%s %s: %s\n",
 					T( "SumProgMan", "Program Manager" ), group, title );
+			}
 		}
 	}
 	for ( key = 0; key < ( update_mode ? 0 : 2 ); key++ )

@@ -11,6 +11,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <direct.h>
 #include <dos.h>
 #include "gdi.h"
@@ -31,6 +32,8 @@ static HFONT ui_font;
 static int option_count;
 static int update_mode;   /* %BOOT%\GDI.INI lists an earlier installation */
 static void find_update( void );
+int gdi_native_run( HINSTANCE instance, const char *ini, const char *dir, int remove,
+                    int nine, const char *registry_plan, const char *task_plan );
 static int has_automatic;
 static int win9x;
 static int engine_running;
@@ -188,6 +191,55 @@ static void release_source_path( void )
     }
 }
 
+/* names in the temporary directory: the DOS engine and its status file,
+ * the registry plan and the plan of WIN.INI and the groups */
+static int temp_paths( void )
+{
+    char *dot;
+    UINT unique;
+    int attempt;
+    engine_path[0] = 0;
+    unique = (UINT)GetTickCount();
+    if ( unique == 0 )
+        unique = 1;
+    for ( attempt = 0; attempt < 100; attempt++ ) {
+        if ( !GetTempFileName( GetTempDrive( 0 ), "GDI", unique + attempt,
+                               engine_path ) )
+            continue;
+        dot = strrchr( engine_path, '.' );
+        if ( dot )
+            strcpy( dot, ".EXE" );
+        else
+            strcat( engine_path, ".EXE" );
+        strcpy( completion_path, engine_path );
+        dot = strrchr( completion_path, '.' );
+        if ( dot )
+            strcpy( dot, ".STS" );
+        else
+            strcat( completion_path, ".STS" );
+        strcpy( registry_plan_path, engine_path );
+        dot = strrchr( registry_plan_path, '.' );
+        if ( dot )
+            strcpy( dot, ".REG" );
+        else
+            strcat( registry_plan_path, ".REG" );
+        strcpy( task_plan_path, engine_path );
+        dot = strrchr( task_plan_path, '.' );
+        if ( dot )
+            strcpy( dot, ".TSK" );
+        else
+            strcat( task_plan_path, ".TSK" );
+        if ( !file_exists( engine_path ) && !file_exists( completion_path ) &&
+             !file_exists( registry_plan_path ) && !file_exists( task_plan_path ) )
+            break;
+        engine_path[0] = 0;
+        completion_path[0] = 0;
+        registry_plan_path[0] = 0;
+        task_plan_path[0] = 0;
+    }
+    return *engine_path != 0;
+}
+
 /* Write the MZ part before the NE header to a temporary executable. */
 static int extract_dos_engine( void )
 {
@@ -197,9 +249,7 @@ static int extract_dos_engine( void )
     static BYTE buffer[2048];
     LONG file_size, stub_size, left, header_size;
     UINT reloc_count, reloc_offset, reloc_bytes;
-    UINT want, got, unique;
-    char *dot;
-    int attempt;
+    UINT want, got;
 
     input = OpenFile( module_path, &of, OF_READ | OF_SHARE_DENY_WRITE );
     if ( input == HFILE_ERROR )
@@ -240,46 +290,7 @@ static int extract_dos_engine( void )
     buffer[0x18] = 0x20;
     buffer[0x19] = 0;
 
-    engine_path[0] = 0;
-    unique = (UINT)GetTickCount();
-    if ( unique == 0 )
-        unique = 1;
-    for ( attempt = 0; attempt < 100; attempt++ ) {
-        if ( !GetTempFileName( GetTempDrive( 0 ), "GDI", unique + attempt,
-                               engine_path ) )
-            continue;
-        dot = strrchr( engine_path, '.' );
-        if ( dot )
-            strcpy( dot, ".EXE" );
-        else
-            strcat( engine_path, ".EXE" );
-        strcpy( completion_path, engine_path );
-        dot = strrchr( completion_path, '.' );
-        if ( dot )
-            strcpy( dot, ".STS" );
-        else
-            strcat( completion_path, ".STS" );
-        strcpy( registry_plan_path, engine_path );
-        dot = strrchr( registry_plan_path, '.' );
-        if ( dot )
-            strcpy( dot, ".REG" );
-        else
-            strcat( registry_plan_path, ".REG" );
-        strcpy( task_plan_path, engine_path );
-        dot = strrchr( task_plan_path, '.' );
-        if ( dot )
-            strcpy( dot, ".TSK" );
-        else
-            strcat( task_plan_path, ".TSK" );
-        if ( !file_exists( engine_path ) && !file_exists( completion_path ) &&
-             !file_exists( registry_plan_path ) && !file_exists( task_plan_path ) )
-            break;
-        engine_path[0] = 0;
-        completion_path[0] = 0;
-        registry_plan_path[0] = 0;
-        task_plan_path[0] = 0;
-    }
-    if ( !*engine_path ) {
+    if ( !temp_paths() ) {
         _lclose( input );
         return 0;
     }
@@ -545,6 +556,102 @@ static int post_tasks( const char *post )
     return 0;
 }
 
+/* what only the DOS engine can do: DOS mode, the exit status of a program
+ * ([Detect]), programs before and after the files are copied ([Run]) */
+static int dos_only( void )
+{
+    const char *value;
+    return !stricmp( ini_get( "Setup", "Mode", "" ), "DOS" ) ||
+           ini_lines( "Detect", 0, &value ) >= 0 ||
+           ini_next( "Run", "Before", 0, &value ) >= 0 ||
+           ini_next( "Run", "After", 0, &value ) >= 0;
+}
+
+/* the package, or one of [Installer], needs the DOS engine */
+static int needs_dos_engine( void )
+{
+    char key[12], path[160];
+    const char *value;
+    int i, n, needed = 0;
+    if ( dos_only() )
+        return 1;
+    for ( i = 1; i <= 99 && !needed; i++ ) {
+        wsprintf( key, "Inst%d", i );
+        if ( !( value = ini_get( "Installer", key, NULL ) ) || !*value )
+            continue;
+        if ( !strnicmp( value, "off|", 4 ) )
+            value += 4;
+        else if ( !strnicmp( value, "on|", 3 ) )
+            value += 3;
+        if ( value[0] && value[1] == ':' )
+            sprintf( path, "%.150s", value );
+        else
+            path_cat( path, source_dir, value );
+        n = strlen( path );
+        if ( n <= 4 || stricmp( path + n - 4, ".INI" ) )
+            strcat( path, path[n - 1] == '\\' ? "INSTALL.INI" : "\\INSTALL.INI" );
+        ini_save();
+        if ( !ini_load( path ) )
+            needed = dos_only();
+        ini_restore();
+    }
+    return needed;
+}
+
+/* the end of the native setup, also after fail() and a cancel */
+static void native_cleanup( void )
+{
+    if ( *registry_plan_path )
+        delete_file( registry_plan_path );
+    if ( *task_plan_path )
+        delete_file( task_plan_path );
+    release_source_path();
+}
+
+/* after the installer core (here or in the DOS engine): the registry, WIN.INI
+ * and the groups from the plans; after INSTALL /U their restore and the
+ * removal of the uninstaller */
+static void apply_results( HWND window )
+{
+    char registry_error[180];
+    char journal_path[128];
+    int registry_failed = 0;
+    if ( uninstall_mode ) {
+        path_cat( journal_path, source_dir, "REGISTRY.LOG" );
+        /* WIN.INI values and groups, then the registry */
+        registry_failed = gdi_tasks_restore( source_dir,
+            registry_error, sizeof(registry_error) );
+        if ( !registry_failed && file_exists( journal_path ) ) {
+            if ( win9x ) {
+                strcpy( registry_error,
+                        "Windows 9x registry restore is not available yet." );
+                registry_failed = 1;
+            } else
+                registry_failed = gdi_reg16_restore_journal(
+                    journal_path, registry_error,
+                    sizeof(registry_error) );
+            if ( !registry_failed ) {
+                delete_file( journal_path );
+                delete_uninstaller();
+            }
+        }
+        else if ( !registry_failed )
+            delete_uninstaller();
+    } else {
+        /* an update leaves no plans */
+        if ( !win9x && *registry_plan_path && file_exists( registry_plan_path ) )
+            registry_failed = gdi_reg16_apply_plan(
+                registry_plan_path, registry_error,
+                sizeof(registry_error) );
+        if ( !registry_failed && *task_plan_path )
+            registry_failed = gdi_tasks_apply( task_plan_path,
+                registry_error, sizeof(registry_error) );
+    }
+    if ( registry_failed )
+        MessageBox( window, registry_error, setup_title,
+                    MB_OK | MB_ICONEXCLAMATION );
+}
+
 static long FAR PASCAL window_proc( HWND window, UINT message,
                                     WPARAM wparam, LPARAM lparam )
 {
@@ -608,48 +715,11 @@ static long FAR PASCAL window_proc( HWND window, UINT message,
             engine_path[0] = 0;
         status = engine_running ? read_completion() : -1;
         if ( status >= 0 ) {
-            char registry_error[180];
-            char journal_path[128];
             engine_running = 0;
             delete_file( completion_path );
             completion_path[0] = 0;
-            if ( status == 0 ) {
-                int registry_failed = 0;
-                if ( uninstall_mode ) {
-                    path_cat( journal_path, source_dir, "REGISTRY.LOG" );
-                    /* WIN.INI values and groups, then the registry */
-                    registry_failed = gdi_tasks_restore( source_dir,
-                        registry_error, sizeof(registry_error) );
-                    if ( !registry_failed && file_exists( journal_path ) ) {
-                        if ( win9x ) {
-                            strcpy( registry_error,
-                                    "Windows 9x registry restore is not available yet." );
-                            registry_failed = 1;
-                        } else
-                            registry_failed = gdi_reg16_restore_journal(
-                                journal_path, registry_error,
-                                sizeof(registry_error) );
-                        if ( !registry_failed ) {
-                            delete_file( journal_path );
-                            delete_uninstaller();
-                        }
-                    }
-                    else if ( !registry_failed )
-                        delete_uninstaller();
-                } else {
-                    /* an update leaves no plans */
-                    if ( !win9x && *registry_plan_path && file_exists( registry_plan_path ) )
-                        registry_failed = gdi_reg16_apply_plan(
-                            registry_plan_path, registry_error,
-                            sizeof(registry_error) );
-                    if ( !registry_failed && *task_plan_path )
-                        registry_failed = gdi_tasks_apply( task_plan_path,
-                            registry_error, sizeof(registry_error) );
-                }
-                if ( registry_failed )
-                    MessageBox( window, registry_error, setup_title,
-                                MB_OK | MB_ICONEXCLAMATION );
-            }
+            if ( status == 0 )
+                apply_results( window );
             if ( *registry_plan_path )
                 delete_file( registry_plan_path );
             registry_plan_path[0] = 0;
@@ -754,6 +824,28 @@ int PASCAL WinMain( HINSTANCE instance, HINSTANCE previous,
         ini_free();
         release_source_path();
         return 2;
+    }
+
+    if ( !needs_dos_engine() ) {
+        /* the installer core runs here; temp_paths() also names an engine
+         * file, which is not written */
+        int rc;
+        if ( !uninstall_mode && !temp_paths() ) {
+            MessageBox( NULL, "No temporary files can be created.", setup_title,
+                        MB_OK | MB_ICONEXCLAMATION );
+            ini_free();
+            release_source_path();
+            return 2;
+        }
+        if ( uninstall_mode )
+            registry_plan_path[0] = task_plan_path[0] = 0;
+        atexit( native_cleanup );
+        rc = gdi_native_run( instance, package_ini, source_dir, uninstall_mode,
+                             win9x, registry_plan_path, task_plan_path );
+        if ( !rc )
+            apply_results( NULL );
+        ini_free();
+        return rc;
     }
 
     if ( !previous ) {

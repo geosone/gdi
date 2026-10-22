@@ -26,20 +26,7 @@
  * changed by the frontend (Windows keeps them in memory while it runs) */
 int frontend( void )
 {
-	return *completion_file != 0;
-}
-
-/* Windows runs (enhanced mode, or standard / real mode of Windows 3.x) */
-int windows_running( void )
-{
-	union REGS r;
-	r.x.ax = 0x1600;
-	int86( 0x2F, &r, &r );
-	if ( r.h.al != 0 && r.h.al != 0x80 )
-		return 1;
-	r.x.ax = 0x4680;
-	int86( 0x2F, &r, &r );
-	return r.x.ax == 0;
+	return *completion_file != 0 || in_windows;
 }
 
 /* add (1) or remove (0) a program in run= of [windows] in WIN.INI */
