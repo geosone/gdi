@@ -34,4 +34,14 @@ printf '%s\n' "$work_dir/check/INSTALL.INI" \
 	'line 16: unknown key Sett= in [Ini]' \
 	'line 17: unknown section [Unbekannt]' \
 	'6 problems' | diff - "$work_dir/check.out"
+# Need=: a condition and a message
+mkdir "$work_dir/need"
+printf '[Setup]\r\nNeed=?MEMMGR|needs a memory manager\r\nNeed=?MISSING|x\r\nNeed=no condition\r\n[Detect]\r\nMEMMGR=CHK.COM\r\n' \
+	> "$work_dir/need/INSTALL.INI"
+: > "$work_dir/need/CHK.COM"
+"$work_dir/gdicheck" "$work_dir/need/INSTALL.INI" > "$work_dir/need.out" && exit 1
+printf '%s\n' "$work_dir/need/INSTALL.INI" \
+	'line 3: condition ?MISSING: not in [Find] or [Detect]' \
+	'line 4: Need=no condition: no condition|message' \
+	'2 problems' | diff - "$work_dir/need.out"
 echo "check tests passed"

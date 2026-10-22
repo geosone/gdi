@@ -7,13 +7,14 @@ default) Setup copies `INSTALL.EXE` and `INSTALL.INI` to the target
 directory; `INSTALL /U` is run from there. It undoes everything in reverse
 order:
 
-1. the binary patches (checked reverse transformation),
-2. the `Remove=` lines and `Extend=` texts of `CONFIG.SYS` and
+1. the programs of `[Run] Uninstall=`,
+2. the binary patches (checked reverse transformation),
+3. the `Remove=` lines and `Extend=` texts of `CONFIG.SYS` and
    `AUTOEXEC.BAT`, the lines and values of `SYSTEM.INI`, `WIN.INI` and the
    other INI files,
-3. the Program Manager items and the groups Setup created,
-4. the registry (from its journal, see [Registry](registry.md)),
-5. the files listed in `INSTALL.LOG`, the target directory and the empty
+4. the Program Manager items and the groups Setup created,
+5. the registry (from its journal, see [Registry](registry.md)),
+6. the files listed in `INSTALL.LOG`, the target directory and the empty
    parent directories Setup created for it (`DIRS.LOG`), and the entry in
    `GDI.INI`.
 

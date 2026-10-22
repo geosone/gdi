@@ -56,6 +56,7 @@ ROOT\*=%BOOT%\                  ; ... to another directory
 [Run]                           ; programs to run before / after copying
 Before=SYS.COM %BOOT%
 Windows=%DIR%\SETUP.EXE          ; once under Windows after setup
+Uninstall=%DIR%\TOOL.COM /U      ; by INSTALL /U, before anything is removed
 
 [Config.sys]
 Remove=AHCIASPI.SYS             ; lines containing this text are removed first
@@ -122,6 +123,7 @@ Accept=Akzeptieren
 | `Space=` | KB the installation needs (default: the files next to `INSTALL.EXE`, archives twice) |
 | `MinDos=` | the DOS version needed, e.g. `5.0` |
 | `MinWindows=` | the Windows version needed, e.g. `3.1` (the version of `USER.EXE` in `%WINDIR%\SYSTEM`) |
+| `Need=` | `condition|message`: setup stops with the message when the condition is false (see below); may be repeated |
 | `Archive=` | take the files from a GDA archive |
 | `Mode=`, `Drive=`, `Fdisk=`, `Format=`, `Extras=`, `ExtrasDir=` | DOS mode |
 
@@ -129,6 +131,20 @@ Before the summary, Setup checks the free space of the target drive (a
 warning; the installation can go on) and `MinDos=`/`MinWindows=` (an
 error). For an `[Installer]` file the space of all chosen packages is added
 up per drive.
+
+`Need=` states what the computer must have, with the conditions of
+[Options and conditions](#options-and-conditions), usually the result of a
+`[Detect]` program. It is checked before the first question, and again
+with `MinDos=`; `INSTALL /U` does not check it. A package that needs a
+memory manager with port trapping, for example:
+
+```ini
+[Setup]
+Need=?MEMMGR|VSBHDA needs 386MAX, QEMM, JEMM or an XMS driver (HIMEM).
+
+[Detect]
+MEMMGR=VSBCHK.COM /ANY
+```
 
 ## Licenses
 
@@ -196,6 +212,13 @@ A copied file that replaces an existing one outside `%DIR%` is kept as a
 backup (see [Uninstall and updates](uninstall-update.md)). `[Dirs]` creates
 directories, `[Run] Before=` and `After=` run DOS programs before and after
 copying.
+
+`[Run] Uninstall=` runs DOS programs at the start of `INSTALL /U`, while
+the installed files are still there: the undo of what a package's own
+`After=` program changed (a settings file of another program, for
+example). All options count as on during `INSTALL /U`, and a program
+without a path is taken from the directory of the installed `INSTALL.EXE`
+(with `SetupDir=` its subdirectory), so name it with `%DIR%`.
 
 `[Run] Windows=condition|program` starts a Windows program once after setup,
 for example the own setup of a package (Internet Explorer). Under Windows the

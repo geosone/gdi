@@ -551,7 +551,21 @@ static unsigned version_number( const char *v )
 	return major * 100 + minor;
 }
 
-/* [Setup] MinDos=, MinWindows= */
+/* [Setup] Need=condition|message: the setup stops with the message when
+ * the condition is false, e.g. Need=?MEMMGR|... with a [Detect] program */
+void check_needs( void )
+{
+	const char *v, *bar;
+	char text[200];
+	int pos = 0;
+	while ( ( pos = ini_next( "Setup", "Need", pos, &v ) ) >= 0 )
+		if ( ( bar = strchr( v, '|' ) ) != NULL && cond( v ) == NULL ) {
+			expand( text, bar + 1, sizeof(text) );
+			fail( text );
+		}
+}
+
+/* [Setup] Need=, MinDos=, MinWindows= */
 void check_versions( void )
 {
 	const char *v;
@@ -559,6 +573,7 @@ void check_versions( void )
 	union REGS r;
 	unsigned long ms, ls;
 	unsigned have;
+	check_needs();
 	if ( ( v = ini_get( "Setup", "MinDos", NULL ) ) != NULL ) {
 		r.x.ax = 0x3000;
 		intdos( &r, &r );

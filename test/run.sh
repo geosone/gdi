@@ -18,6 +18,10 @@
 #   PKG=test/depends ONEEXE=1 MANAGE=1 TARGET=PKGA TIMEOUT=15 KEYS=... test/run.sh
 #                       then INSTALL /M removes both packages
 #   CHECK=1 test/run.sh   INSTALL /CHECK of test/TEST.INI
+#   INI=test/TESTNEED.INI SILENT=1 TARGET=SILENT NEED=fail test/run.sh
+#                       [Setup] Need=: a false condition stops the setup
+#                       (NEED=pass: without the false one it installs;
+#                       NEED=pass UNINST=1: [Run] Uninstall=)
 #   PKG=test/extras ONEEXE=1 EXTRAS=1 TARGET=MAIN TIMEOUT=15 KEYS=... test/run.sh
 #                       [Extras]: A installed from its directory, B skipped
 #                       (EXTRAS=none: A unticked in the list, B skipped)
@@ -57,6 +61,11 @@ else
     printf '[Language]\r\nSelected=en\r\n[Keep]\r\nValue=preserved\r\n' > "$OUT/src/SETTINGS.INI"
     printf 'TESTVXD test VxD\r\n' > "$OUT/src/TESTVXD.386"
 fi
+if [ -n "${NEED:-}" ]; then   # MARK.COM: creates A:\UNRUN.TXT ([Run] Uninstall=)
+    printf 'org 100h\nmov ah,3Ch\nxor cx,cx\nmov dx,n\nint 21h\nmov bx,ax\nmov ah,3Eh\nint 21h\nint 20h\nn db "A:\\UNRUN.TXT",0\n' > "$OUT/mark.asm"
+    nasm -f bin -o "$OUT/src/MARK.COM" "$OUT/mark.asm" || exit 1
+fi
+[ "${NEED:-}" = pass ] && sed -i '/^Need=?NO|/d' "$OUT/src/INSTALL.INI"
 [ -n "${SILENT:-}" ] && printf '[Answers]\r\nDir=A:\\SILENT\r\n' > "$OUT/src/ANS.INI"
 printf 'org 100h\nmov dx,501h\nout dx,al\nint 20h\n' > "$OUT/qexit.asm" && nasm -f bin -o "$OUT/src/QEXIT.COM" "$OUT/qexit.asm"
 if [ -n "${MENU:-}" ]; then   # multi-config CONFIG.SYS
@@ -143,6 +152,24 @@ if [ -n "${LANGUAGE:-}" ]; then
     mcopy -o -i "$P" ::/TESTLANG/SETTINGS.INI "$OUT/LANGUAGE.INI"
     python3 -c 'import configparser,sys; c=configparser.ConfigParser(); c.read(sys.argv[1]); assert c["Language"]["Selected"] == "de"; assert c["Keep"]["Value"] == "preserved"' "$OUT/LANGUAGE.INI" || exit 1
     echo "DOS language selection integration passed"
+fi
+if [ "${NEED:-}" = fail ]; then   # stopped before anything was installed
+    mdir -i "$P" "::/$TARGET" >/dev/null 2>&1 && { echo "installed despite Need="; exit 1; }
+    grep -aq '=== TARGET' "$OUT/serial.log" || { echo "setup did not end"; exit 1; }
+    echo "Need= stopped the setup"
+    exit 0
+fi
+if [ "${NEED:-}" = pass ]; then
+    if [ -n "${UNINST:-}" ]; then
+        mdir -i "$P" ::/UNRUN.TXT >/dev/null 2>&1 || { echo "[Run] Uninstall= not run"; exit 1; }
+        mdir -i "$P" "::/$TARGET" >/dev/null 2>&1 && { echo "not removed"; exit 1; }
+        echo "[Run] Uninstall= ran"
+    else
+        mdir -i "$P" "::/$TARGET/README.TXT" >/dev/null 2>&1 || { echo "not installed"; exit 1; }
+        mdir -i "$P" ::/UNRUN.TXT >/dev/null 2>&1 && { echo "Uninstall= ran at install"; exit 1; }
+    fi
+    echo "Need= passed"
+    exit 0
 fi
 if [ -n "${DEPENDS:-}" ]; then
     # B is required by A: selected as well and installed first; C conflicts

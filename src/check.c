@@ -70,10 +70,10 @@ static const char *setup_keys[] = {
 	"Title", "Product", "Version", "Id", "License", "Readme", "DefaultDir",
 	"Done", "Uninstall", "Requires", "Conflicts", "Texts", "Mode", "Drive",
 	"Archive", "Extras", "ExtrasDir", "Fdisk", "Format", "Windows", "Space",
-	"MinDos", "MinWindows", "SetupDir", NULL
+	"MinDos", "MinWindows", "SetupDir", "Need", NULL
 };
 static const char *options_keys[] = { "Option", NULL };
-static const char *run_keys[] = { "Before", "After", "Windows", NULL };
+static const char *run_keys[] = { "Before", "After", "Windows", "Uninstall", NULL };
 static const char *dos_keys[] = { "Remove", "Add", "Position", "Extend", "Replace", "PathAppend", "PathRemove", NULL };
 static const char *system_keys[] = { "Remove", "Add", "Set", "Change", "Replace", NULL };
 static const char *set_keys[] = { "Set", NULL };
@@ -327,6 +327,10 @@ int gdi_check( const char *ini, void (*out)( const char *text ) )
 						need_file( strchr( e, '|' ) + 1, "License" );
 					else if ( same( key, "License" ) && !isdigit( (unsigned char)*e ) )
 						need_file( strchr( e, '|' ) ? strchr( e, '|' ) + 1 : e, "License" );
+					else if ( same( key, "Need" ) ) {
+						if ( !strchr( e, '|' ) || condition( e ) == e )
+							problem( "Need=%s: no condition|message%s", e, "" );
+					}
 					continue;
 				}
 				if ( same( section, "Options" ) ) {

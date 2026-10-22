@@ -666,6 +666,7 @@ void remove_all( void )
 	for ( pos = 0; pos < MAXOPT; pos++ )
 		opt_on[pos] = 1;
 	find_windows();
+	run_all( "Uninstall" );   /* the package's own undo, while its files are there */
 	patch_all();
 	edit_all();
 	progman_undo();

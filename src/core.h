@@ -131,6 +131,7 @@ void ask_dirs( void );
 int confirm( void );
 unsigned long package_space( void );
 void check_space( char drive, unsigned long need );
+void check_needs( void );
 void check_versions( void );
 int find_used( const char *name );
 

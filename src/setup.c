@@ -414,6 +414,7 @@ int core_run( void )
 	if ( uninstall )
 		remove_all();
 	else {
+		check_needs();   /* before the questions */
 		if ( dosmode ) {
 			welcome();
 			license();
