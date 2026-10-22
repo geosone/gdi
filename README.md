@@ -24,7 +24,9 @@ License: GNU General Public License version 3.
 - finds installed programs (`[Find]`) and runs package detection programs
   (`[Detect]`) for the defaults of the options;
 - in DOS mode: partitions and formats the hard disk, installs a DOS and
-  further software in the same run.
+  further software in the same run;
+- speaks the language of the system, English and German so far
+  (`src/language.ini`; a further language is a further section).
 
 ## Usage
 
