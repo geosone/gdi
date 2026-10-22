@@ -335,7 +335,7 @@ static int file_target( const char *line, const char *name, char *path )
 			path_cat( t, dest, dst );
 			strcpy( dst, t );
 		}
-		if ( wild )
+		if ( wild || ( *dst && dst[strlen( dst ) - 1] == '\\' ) )   /* NAME=DIR\ */
 			path_cat( path, dst, rest );
 		else
 			strcpy( path, dst );

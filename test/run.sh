@@ -166,6 +166,7 @@ if [ "${NEED:-}" = pass ]; then
         echo "[Run] Uninstall= ran"
     else
         mdir -i "$P" "::/$TARGET/README.TXT" >/dev/null 2>&1 || { echo "not installed"; exit 1; }
+        mdir -i "$P" "::/$TARGET/DOCS/README.TXT" >/dev/null 2>&1 || { echo "NAME=DIR\\ not copied"; exit 1; }
         mdir -i "$P" ::/UNRUN.TXT >/dev/null 2>&1 && { echo "Uninstall= ran at install"; exit 1; }
     fi
     echo "Need= passed"
