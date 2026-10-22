@@ -222,7 +222,8 @@ files; this does not translate the installer itself.
 ## Installer texts
 
 All texts of the installer can be replaced in `[Text]`. The keys are the
-first arguments of `T()` in `src/install.c` (DOS) and of `ini_get( "Text", ...)`
-in `src/wininstall.c` (Windows), for example `WelcomeTitle`, `LicenseTitle`,
+first arguments of `T()` and `gdi_text()` in the installer core (`src/*.c`,
+the key bar texts in `src/ui_dos.c`) and of `ini_get( "Text", ...)` in
+`src/wininstall.c` (Windows), for example `WelcomeTitle`, `LicenseTitle`,
 `Accept`, `Decline`, `DirTitle`, `DirText`, `OptionsTitle`, `SumTitle`,
 `Install`, `Cancel`, `DoneTitle`, `DoneText`, `KeysMsg`, `NeedDos`.

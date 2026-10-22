@@ -1,0 +1,537 @@
+/* files.c - GeosOne Dual Installer, copying, INSTALL.LOG, updates, GDI.INI,
+ * INSTALL /U
+ * Copyright (C) 2026 GeosOne.  GNU General Public License version 3. */
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <ctype.h>
+#include <direct.h>
+#include <io.h>
+#include <dos.h>
+#include <i86.h>
+#include <process.h>
+#include <setjmp.h>
+#include <malloc.h>
+#include "gdi.h"
+#include "ui.h"
+#include "hexpatch.h"
+#include "regtxn.h"
+#include "progman.h"
+#include "core.h"
+
+/* --- copying ---------------------------------------------------------- */
+
+static const char *progtitle;
+static char progname[40];
+
+void gdi_progress( unsigned long done, unsigned long total )
+{
+	ui_progress( progtitle, progname, done ? done : 1, total ? total : 1 );
+}
+
+void gdi_progress_name( const char *name )
+{
+	const char *b = strrchr( name, '\\' );
+	sprintf( progname, "%.39s", b ? b + 1 : name );
+}
+
+/* ask for disk n of the archive; 0 = inserted, 1 = cancel */
+int gdi_ask_disk( int n )
+{
+	static const char *b[2];
+	char key[4], msg[200];
+	int rc;
+	b[0] = T( "OK", "OK" );
+	b[1] = T( "Cancel", "Cancel" );
+	sprintf( key, "%d", n );
+	sprintf( msg, T( "InsertDisk", "Please insert disk %d into drive %c:" ), n, srcdir[0] );
+	if ( ini_get( "Disks", key, NULL ) )
+		sprintf( msg + strlen( msg ), "\n\n%s", ini_get( "Disks", key, "" ) );
+	rc = ui_message( T( "DiskTitle", "Next disk" ), msg, b, 2, 0, 0 );
+	ui_clear();
+	ui_progress( progtitle, "", 0, 1 );
+	return rc != 0;
+}
+
+/* --- updates ------------------------------------------------------------ */
+
+#define MAXOLD 800
+static char __far *old_log[MAXOLD];   /* far heap: a log can be long */
+static int nold;
+
+
+/* %BOOT%\GDI.INI [Installed] lists every installation that can be removed
+ * again (Uninstall=yes): Id=directory|options|version.  Setup finds an
+ * earlier installation of the package there and updates it: only the files
+ * are replaced.  CONFIG.SYS, AUTOEXEC.BAT, SYSTEM.INI, WIN.INI, the groups,
+ * the registry and the package's settings files ([Keep]) stay as they are. */
+
+int record_read_key( const char *key, char *dir, char *bits, char *version )
+{
+	return gdi_record_read( boot, key, dir, bits, version );
+}
+
+static int record_read( char *dir, char *bits, char *version )
+{
+	char key[64];
+	ini_package_id( key, sizeof(key) );
+	return record_read_key( key, dir, bits, version );
+}
+
+/* enter (add) or remove this installation in GDI.INI */
+void record_write( int add )
+{
+	char key[64], value[120], bits[MAXOPT + 1];
+	int i;
+	ini_package_id( key, sizeof(key) );
+	for ( i = 0; i < nopt; i++ )
+		bits[i] = opt_on[i] ? '1' : '0';
+	bits[nopt] = 0;
+	sprintf( value, "%s|%s|%.23s", dest, bits, ini_get( "Setup", "Version", "" ) );
+	gdi_record_write( boot, key, add ? value : NULL );
+}
+
+/* an earlier installation of this package: ask, then update it */
+void find_update( void )
+{
+	static const char *b[2];
+	static char text[500];
+	char dir[80], bits[MAXOPT + 1], p[80];
+	const char *version = ini_get( "Setup", "Version", "" );
+	int i;
+	update_mode = 0;
+	if ( dosmode || stricmp( ini_get( "Setup", "Uninstall", "yes" ), "yes" ) ||
+		!record_read( dir, bits, old_version ) )
+		return;
+	path_cat( p, dir, "INSTALL.INI" );
+	if ( !file_exists( p ) )
+		return;
+	sprintf( text, T( "UpdateText", "%s is already installed in %s. Setup replaces its files; the system settings and the settings files of the program stay as they are." ),
+		ini_get( "Setup", "Product", "The software" ), dir );
+	if ( *old_version || *version )
+		sprintf( text + strlen( text ), "\n\n%s %s\n%s %s",
+			T( "UpdateOld", "Installed version:" ), *old_version ? old_version : "?",
+			T( "UpdateNew", "New version:" ), *version ? version : "?" );
+	b[0] = T( "Update", "Update" );
+	b[1] = T( "Cancel", "Cancel" );
+	ui_clear();
+	if ( !in_batch && ui_message( T( "UpdateTitle", "Update" ), text, b, 2, 0, 0 ) != 0 )
+		abort_setup();
+	update_mode = 1;
+	strcpy( dest, dir );
+	find_dest();
+	old_entries_load( p );   /* before the new INSTALL.INI replaces it */
+	for ( i = 0; i < nopt && bits[i]; i++ )
+		opt_on[i] = bits[i] == '1';
+}
+
+static int wild_match( const char *p, const char *s )
+{
+	for ( ; *p; p++, s++ ) {
+		if ( *p == '*' ) {
+			for ( ;; s++ ) {
+				if ( wild_match( p + 1, s ) )
+					return 1;
+				if ( !*s )
+					return 0;
+			}
+		}
+		if ( !*s || ( *p != '?' && toupper( (unsigned char)*p ) != toupper( (unsigned char)*s ) ) )
+			return 0;
+	}
+	return !*s;
+}
+
+static int old_log_find( const char *path );
+
+/* update: an existing settings file stays ([Keep] cond|pattern; a pattern
+ * without a path is a file name, else a path below %DIR% or a full path;
+ * without [Keep]: *.INI and *.CFG).  Its log line is kept. */
+static int keep_file( const char *path )
+{
+	const char *v, *t, *name = strrchr( path, '\\' );
+	char pat[80];
+	int pos = 0, n = strlen( dest ), any = 0, keep = 0, i;
+	name = name ? name + 1 : path;
+	if ( !update_mode || !file_exists( path ) )
+		return 0;
+	while ( !keep && ( pos = ini_lines( "Keep", pos, &v ) ) >= 0 ) {
+		any = 1;
+		if ( ( t = cond( v ) ) == NULL )
+			continue;
+		expand( pat, t, sizeof(pat) );
+		if ( pat[1] == ':' )
+			keep = wild_match( pat, path );
+		else if ( strchr( pat, '\\' ) )
+			keep = !strnicmp( path, dest, n ) && path[n] == '\\' && wild_match( pat, path + n + 1 );
+		else
+			keep = wild_match( pat, name );
+	}
+	if ( !any )
+		keep = wild_match( "*.INI", name ) || wild_match( "*.CFG", name );
+	if ( keep && logf && ( i = old_log_find( path ) ) >= 0 ) {
+		fprintf( logf, "%Fs\n", old_log[i] );
+		_ffree( old_log[i] );
+		old_log[i] = NULL;
+	}
+	return keep;
+}
+
+/* INSTALL.LOG: one line per installed file, "path|backup" when an existing
+ * file was replaced (INSTALL /U puts the backup back).  The lines of an
+ * earlier installation into the same directory are kept: a file installed
+ * again keeps its first backup, so the original is restored. */
+static void old_log_load( const char *path )
+{
+	FILE *f = fopen( path, "r" );
+	char l[180];
+	nold = 0;
+	if ( !f )
+		return;
+	while ( nold < MAXOLD && fgets( l, sizeof(l), f ) ) {
+		char __far *p;
+		strip_eol( l );
+		if ( !*l || !( p = _fmalloc( strlen( l ) + 1 ) ) )
+			continue;
+		_fstrcpy( p, l );
+		old_log[nold++] = p;
+	}
+	fclose( f );
+}
+
+/* the old line for path (up to '|'), or -1 */
+static int old_log_find( const char *path )
+{
+	int i, n = strlen( path );
+	for ( i = 0; i < nold; i++ ) {
+		const char __far *l = old_log[i];
+		int k;
+		if ( !l )
+			continue;
+		for ( k = 0; k < n && l[k] && toupper( (unsigned char)l[k] ) == toupper( (unsigned char)path[k] ); k++ );
+		if ( k == n && ( !l[k] || l[k] == '|' ) )
+			return i;
+	}
+	return -1;
+}
+
+/* the lines of the old log that were not installed again */
+static void old_log_flush( void )
+{
+	int i;
+	for ( i = 0; i < nold; i++ )
+		if ( old_log[i] ) {
+			if ( logf )
+				fprintf( logf, "%Fs\n", old_log[i] );
+			_ffree( old_log[i] );
+			old_log[i] = NULL;
+		}
+	nold = 0;
+}
+
+/* before a file is written: log it, keep the file it replaces */
+static void log_file( const char *path )
+{
+	char saved[80];
+	int i;
+	if ( !logf )
+		return;
+	if ( ( i = old_log_find( path ) ) >= 0 ) {
+		fprintf( logf, "%Fs\n", old_log[i] );
+		_ffree( old_log[i] );
+		old_log[i] = NULL;
+		return;
+	}
+	backup_as( path, saved );
+	if ( *saved )
+		fprintf( logf, "%s|%s\n", path, saved );
+	else
+		fprintf( logf, "%s\n", path );
+}
+
+/* [Files] line "cond|PATTERN=DEST": PATTERN is a name or "DIR\*" (all
+ * archive files below DIR\, "*" = all); DEST is a name or directory,
+ * relative to %DIR% unless it is a full path.  Returns 1 if name matches
+ * and sets the target path. */
+static int file_target( const char *line, const char *name, char *path )
+{
+	char pat[80], dst[80];
+	const char *eq = strchr( line, '=' ), *rest;
+	int l, wild;
+	sprintf( pat, "%.*s", eq ? (int)( eq - line ) : 79, line );
+	l = strlen( pat );
+	wild = l && pat[l - 1] == '*';
+	if ( wild ) {
+		if ( strnicmp( name, pat, l - 1 ) )
+			return 0;
+		rest = name + l - 1;
+	} else {
+		if ( stricmp( name, pat ) )
+			return 0;
+		rest = name;
+	}
+	if ( eq ) {
+		expand( dst, eq + 1, sizeof(dst) );
+		if ( dst[1] != ':' ) {
+			char t[80];
+			path_cat( t, dest, dst );
+			strcpy( dst, t );
+		}
+		if ( wild )
+			path_cat( path, dst, rest );
+		else
+			strcpy( path, dst );
+	} else
+		path_cat( path, dest, wild ? rest : name );
+	return 1;
+}
+
+static void make_parent( const char *path )
+{
+	char d[80], *b;
+	strcpy( d, path );
+	if ( ( b = strrchr( d, '\\' ) ) != NULL && b - d > 2 ) {
+		*b = 0;
+		mkdirs( d );
+	}
+}
+
+/* target of an archive file (callback of arc_install): 0 = install */
+static int arc_target( const char *name, char *path )
+{
+	const char *v, *t;
+	int pos = 0;
+	while ( ( pos = ini_lines( "Files", pos, &v ) ) >= 0 )
+		if ( ( t = cond( v ) ) != NULL && file_target( t, name, path ) ) {
+			make_parent( path );
+			if ( keep_file( path ) )
+				return -1;
+			log_file( path );
+			return 0;
+		}
+	return -1;
+}
+
+void copy_all( void )
+{
+	const char *v, *t, *arc = ini_get( "Setup", "Archive", NULL );
+	char from[80], to[80], name[40];
+	int pos = 0, total = 0, done = 0, i;
+	int unin = !stricmp( ini_get( "Setup", "Uninstall", dosmode ? "no" : "yes" ), "yes" );
+
+	progtitle = T( "CopyTitle", "Copying files" );
+	if ( unin ) {
+		path_cat( to, dest, "INSTALL.LOG" );
+		old_log_load( to );
+		logf = fopen( to, "w" );
+		if ( *dest_top ) {
+			FILE *f;
+			path_cat( to, dest, "DIRS.LOG" );
+			if ( ( f = fopen( to, "w" ) ) != NULL ) {
+				fprintf( f, "%s\n", dest_top );
+				fclose( f );
+			}
+		}
+	}
+	/* [Dirs]: directories to create (cond|path) */
+	while ( ( pos = ini_lines( "Dirs", pos, &v ) ) >= 0 )
+		if ( ( t = cond( v ) ) != NULL ) {
+			expand( to, t, sizeof(to) );
+			mkdirs( to );
+		}
+	pos = 0;
+	/* plain files next to INSTALL.EXE */
+	while ( ( pos = ini_lines( "Files", pos, &v ) ) >= 0 )
+		if ( cond( v ) )
+			total++;
+	if ( unin )
+		total += 2;
+	pos = 0;
+	ui_progress( progtitle, "", 0, total );
+	while ( ( pos = ini_lines( "Files", pos, &v ) ) >= 0 ) {
+		if ( !( t = cond( v ) ) )
+			continue;
+		sprintf( name, "%.*s", strchr( t, '=' ) ? (int)( strchr( t, '=' ) - t ) : 39, t );
+		if ( strchr( name, '*' ) )
+			continue;
+		path_cat( from, srcdir, name );
+		if ( arc && !file_exists( from ) )
+			continue;   /* in the archive */
+		file_target( t, name, to );
+		make_parent( to );
+		ui_progress( progtitle, name, ++done, total );
+		if ( keep_file( to ) )
+			continue;
+		log_file( to );
+		if ( copy_file( from, to ) ) {
+			char msg[160];
+			sprintf( msg, "%s %s -> %s", T( "CopyError", "Cannot copy" ), from, to );
+			fail( msg );
+		}
+	}
+	/* [Find] files from the installation disk that are used */
+	for ( i = 0; i < nfind; i++ )
+		if ( finds[i].file[0] && find_used( finds[i].name ) ) {
+			path_cat( from, srcdir, finds[i].file );
+			ui_progress( progtitle, finds[i].file, done, total );
+			log_file( finds[i].path );
+			if ( copy_file( from, finds[i].path ) ) {
+				char msg[160];
+				sprintf( msg, "%s %s -> %s", T( "CopyError", "Cannot copy" ), from, finds[i].path );
+				fail( msg );
+			}
+		}
+	if ( unin ) {
+		/* INSTALL /U in the target directory removes the installation */
+		path_cat( from, srcdir, "INSTALL.EXE" );
+		path_cat( to, dest, "INSTALL.EXE" );
+		ui_progress( progtitle, "INSTALL.EXE", ++done, total );
+		copy_file( from, to );
+		path_cat( from, srcdir, "INSTALL.INI" );
+		path_cat( to, dest, "INSTALL.INI" );
+		ui_progress( progtitle, "INSTALL.INI", ++done, total );
+		copy_file( from, to );
+	}
+	if ( arc ) {
+		char base[80];
+		const char *err;
+		path_cat( base, srcdir, arc );
+		ui_clear();
+		ui_progress( progtitle, "", 0, 1 );
+		if ( ( err = arc_install( base, arc_target ) ) != NULL ) {
+			char msg[160];
+			if ( !strcmp( err, "Cancelled" ) )
+				abort_setup();
+			if ( !strcmp( err, "CreateError" ) )
+				sprintf( msg, "%s %s", T( "CopyError", "Cannot copy" ), arc_errfile() );
+			else if ( !strcmp( err, "CrcError" ) || !strcmp( err, "BadArchive" ) || !strcmp( err, "ReadError" ) )
+				sprintf( msg, "%s (%s)", T( "DiskError", "The disk is damaged or not readable." ), progname );
+			else
+				sprintf( msg, "%s", T( err, err ) );
+			fail( msg );
+		}
+	}
+	old_log_flush();
+	if ( logf ) {
+		fclose( logf );
+		logf = NULL;
+	}
+}
+
+/* [Run] Before= / After=: programs to run (cond|command line); a program
+ * without a path is taken from the directory of INSTALL.EXE */
+int run_program( const char *cmdline )
+{
+	int rc;
+	ui_exit();
+	rc = spawn_program( cmdline );
+	ui_init();
+	ui_title( ini_get( "Setup", "Title", "Setup" ), ini_get( "Setup", "Product", "GeosOne Dual Installer" ) );
+	ui_clear();
+	return rc;
+}
+
+void run_all( const char *key )
+{
+	const char *v, *t;
+	int pos = 0;
+	while ( ( pos = ini_next( "Run", key, pos, &v ) ) >= 0 )
+		if ( ( t = cond( v ) ) != NULL && run_program( t ) == -1 ) {
+			char msg[160];
+			sprintf( msg, "%s %s", T( "RunError", "Cannot run" ), t );
+			fail( msg );
+		}
+}
+
+void edit_all( void )
+{
+	char p[80];
+	sprintf( p, "%s\\CONFIG.SYS", boot );
+	edit_file( p, "Config.sys", 0 );
+	sprintf( p, "%s\\AUTOEXEC.BAT", boot );
+	edit_file( p, "Autoexec.bat", 1 );
+	if ( windir[0] ) {
+		path_cat( p, windir, "SYSTEM.INI" );
+		if ( file_exists( p ) )
+			edit_file( p, "System.ini", 2 );
+		path_cat( p, windir, "WIN.INI" );
+		if ( !frontend() && file_exists( p ) )
+			edit_file( p, "Win.ini", 3 );
+	}
+}
+
+void remove_all( void )
+{
+	const char *v, *t;
+	char p[80], name[40];
+	int pos = 0, had_log = 0, pending;
+	static const char *b[2];
+	b[0] = T( "Remove", "Remove" );
+	b[1] = T( "Cancel", "Cancel" );
+	if ( ui_message( T( "UninstTitle", "Remove" ), T( "UninstText", "Remove the installation from this directory and its entries from CONFIG.SYS, AUTOEXEC.BAT and SYSTEM.INI?" ), b, 2, 1, 0 ) != 0 )
+		abort_setup();
+	strcpy( dest, srcdir );
+	for ( pos = 0; pos < MAXOPT; pos++ )
+		opt_on[pos] = 1;
+	find_windows();
+	patch_all();
+	edit_all();
+	progman_undo();
+	pending = uninstall_registry();
+	path_cat( p, dest, "INSTALL.LOG" );
+	if ( ( logf = fopen( p, "r" ) ) != NULL ) {
+		/* the files installed (from archives: also below %DIR%); a
+		 * replaced file comes back from its backup */
+		char l[180];
+		had_log = 1;
+		while ( fgets( l, sizeof(l), logf ) ) {
+			char *e, *b;
+			strip_eol( l );
+			if ( ( e = strchr( l, '|' ) ) != NULL ) {
+				*e++ = 0;
+				if ( file_exists( e ) ) {
+					remove( l );
+					if ( rename( e, l ) && !copy_file( e, l ) )
+						remove( e );
+				}
+				continue;
+			}
+			runner_path( p );
+			if ( pending && !stricmp( l, p ) )
+				continue;   /* runs at the next start of Windows */
+			remove( l );
+			while ( ( b = strrchr( l, '\\' ) ) != NULL && b - l > 2 && stricmp( l, dest ) ) {
+				*b = 0;
+				if ( rmdir( l ) )
+					break;
+			}
+		}
+		fclose( logf );
+		logf = NULL;
+		path_cat( p, dest, "INSTALL.LOG" );
+		remove( p );
+	}
+	pos = 0;
+	while ( !had_log && ( pos = ini_lines( "Files", pos, &v ) ) >= 0 ) {
+		const char *eq;
+		t = strchr( v, '|' ) ? strchr( v, '|' ) + 1 : v;
+		if ( strchr( t, '*' ) )
+			continue;
+		eq = strchr( t, '=' );
+		strcpy( name, eq ? eq + 1 : t );
+		if ( name[1] == ':' )
+			strcpy( p, name );
+		else
+			path_cat( p, dest, name );
+		remove( p );
+	}
+	record_write( 0 );
+	if ( !keep_uninstaller && !pending ) {
+		path_cat( p, dest, "INSTALL.INI" );
+		remove( p );
+		path_cat( p, dest, "INSTALL.EXE" );
+		remove( p );
+		gdi_remove_dirs( dest );
+	}
+}

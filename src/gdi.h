@@ -42,7 +42,7 @@ void gdi_record_write( const char *boot, const char *key, const char *value );
 void gdi_note_parents( const char *dir, char *top );
 void gdi_remove_dirs( const char *dir );
 
-/* install.c: called by archive.c */
+/* files.c: called by archive.c */
 void gdi_progress( unsigned long done, unsigned long total );
 void gdi_progress_name( const char *name );
 int  gdi_ask_disk( int n );
