@@ -52,6 +52,9 @@ extern int in_batch;                   /* a package of [Installer] */
 extern int in_extra;                   /* INSTALL.LOG: installed files */
 extern char selected_language[9];
 
+/* a text of the installer (lang.c) */
+#define T gdi_text
+
 extern char dest_top[80];
 extern char *ed[MAXLINE];
 extern int ned;
@@ -68,7 +71,6 @@ int mkdirs( const char *path );
 int copy_file( const char *from, const char *to );
 void fail( const char *text );
 void abort_setup( void );
-const char *T( const char *key, const char *def );
 void write_completion( void );
 
 /* sysfiles.c */

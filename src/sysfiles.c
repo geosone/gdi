@@ -393,7 +393,7 @@ static void ed_add_ini( void )
 			continue;
 		if ( !f && !( f = fopen( journal, "a" ) ) ) {
 			char msg[120];
-			sprintf( msg, "%s %s", T( "WriteError", "Cannot write" ), journal );
+			sprintf( msg, "%s %s", T( "WriteError" ), journal );
 			fail( msg );
 		}
 		fprintf( f, "%s|%s\n", sec, line );
@@ -834,7 +834,7 @@ static void patch_variants( void )
 			continue;
 		if ( count == MAX_PATCH_VARIANTS ||
 			patch_variant_split( text, &variants[count] ) )
-			fail( T( "PatchDefinition", "Invalid [HexPatch] patch entry." ) );
+			fail( T( "PatchDefinition" ) );
 		if ( uninstall ) {
 			unsigned char swap[HEXPATCH_MAX_BYTES];
 			memcpy( swap, variants[count].before, variants[count].length );
@@ -870,11 +870,10 @@ static void patch_variants( void )
 			continue;
 		if ( applicable != 1 ) {
 			if ( io_error && !applicable )
-				sprintf( message, "%s %s", T( "PatchError", "Cannot patch" ),
+				sprintf( message, "%s %s", T( "PatchError" ),
 					variants[i].path );
 			else
-				sprintf( message, "%s %s", T( "PatchMismatch",
-					"Binary signature has an unexpected match count in" ),
+				sprintf( message, "%s %s", T( "PatchMismatch" ),
 					variants[i].path );
 			fail( message );
 		}
@@ -882,7 +881,7 @@ static void patch_variants( void )
 			variants[selected].before, variants[selected].after,
 			variants[selected].length, variants[selected].expected );
 		if ( result != HEXPATCH_OK && result != HEXPATCH_ALREADY ) {
-			sprintf( message, "%s %s", T( "PatchError", "Cannot patch" ),
+			sprintf( message, "%s %s", T( "PatchError" ),
 				variants[selected].path );
 			fail( message );
 		}
@@ -924,11 +923,11 @@ void patch_all( void )
 			if ( !text )
 				continue;
 			if ( patch_split( text, path, old_hex, new_hex, &expected ) )
-				fail( T( "PatchDefinition", "Invalid [HexPatch] Patch entry." ) );
+				fail( T( "PatchDefinition" ) );
 			old_length = hexpatch_parse( old_hex, old_bytes, sizeof(old_bytes) );
 			new_length = hexpatch_parse( new_hex, new_bytes, sizeof(new_bytes) );
 			if ( old_length < 1 || old_length != new_length )
-				fail( T( "PatchDefinition", "Invalid [HexPatch] Patch entry." ) );
+				fail( T( "PatchDefinition" ) );
 			if ( !file_exists( path ) && ( key == 1 || uninstall ) )
 				continue;
 			if ( uninstall ) {
@@ -942,9 +941,9 @@ void patch_all( void )
 			if ( result == HEXPATCH_OK || result == HEXPATCH_ALREADY )
 				continue;
 			if ( result == HEXPATCH_MISMATCH )
-				sprintf( message, "%s %s", T( "PatchMismatch", "Binary signature has an unexpected match count in" ), path );
+				sprintf( message, "%s %s", T( "PatchMismatch" ), path );
 			else
-				sprintf( message, "%s %s", T( "PatchError", "Cannot patch" ), path );
+				sprintf( message, "%s %s", T( "PatchError" ), path );
 			fail( message );
 		}
 	patch_variants();
@@ -976,7 +975,7 @@ void edit_file( const char *path, const char *section, int kind )
 	if ( kind >= 2 && uninstall ) {
 		restored = ed_restore_ini( set_journal_path, section );
 		if ( restored < 0 )
-			fail( T( "SetRestoreError", "Cannot restore SYSTEM.INI settings." ) );
+			fail( T( "SetRestoreError" ) );
 		if ( kind == 2 )
 			unadded = ed_unadd_ini();
 	}
@@ -992,10 +991,10 @@ void edit_file( const char *path, const char *section, int kind )
 			ed_add_dos( section, kind == 0 );
 	}
 	if ( kind >= 2 && !uninstall && ed_set_ini( section ) )
-		fail( T( "SetDefinition", "Invalid [System.ini] Set entry." ) );
+		fail( T( "SetDefinition" ) );
 	if ( ed_save( path ) ) {
 		char msg[120];
-		sprintf( msg, "%s %s", T( "WriteError", "Cannot write" ), path );
+		sprintf( msg, "%s %s", T( "WriteError" ), path );
 		fail( msg );
 	}
 	if ( restored > 0 )

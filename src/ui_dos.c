@@ -462,25 +462,25 @@ void ui_clear( void )
 
 int ui_message( const char *title, const char *text, const char **buttons, int n, int sel, int error )
 {
-	scr_keys( gdi_text( "KeysMsg", "Enter=Select  Esc=Abort" ) );
+	scr_keys( gdi_text( "KeysMsg" ) );
 	return scr_message( title, text, buttons, n, sel, error );
 }
 
 int ui_input( const char *title, const char *text, char *buf, int max )
 {
-	scr_keys( gdi_text( "KeysInput", "Enter=Continue  Esc=Abort" ) );
+	scr_keys( gdi_text( "KeysInput" ) );
 	return scr_input( title, text, buf, max );
 }
 
 int ui_view( const char *title, ftext *lines, int nlines, const char **buttons, int n, int sel )
 {
-	scr_keys( gdi_text( "KeysView", "PgUp=Page up  PgDn=Page down  Enter=Select  Esc=Abort" ) );
+	scr_keys( gdi_text( "KeysView" ) );
 	return scr_view( title, lines, nlines, buttons, n, sel );
 }
 
 int ui_checklist( const char *title, const char *text, const char **items, char *on, int n )
 {
-	scr_keys( gdi_text( "KeysOpt", "Space=On/off  Enter=Continue  Esc=Abort" ) );
+	scr_keys( gdi_text( "KeysOpt" ) );
 	return scr_checklist( title, text, items, on, n );
 }
 

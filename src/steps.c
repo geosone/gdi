@@ -215,8 +215,8 @@ void show_text( const char *title, const char *file, const char **buttons, int n
 		path_cat( p, dest, file );
 	if ( !( l = text_load( p, &nl ) ) ) {
 		char msg[120];
-		sprintf( msg, "%s %s", file_exists( p ) ? T( "NoMemory", "Not enough memory for" )
-		                                        : T( "MissingFile", "File not found:" ), p );
+		sprintf( msg, "%s %s", file_exists( p ) ? T( "NoMemoryFor" )
+		                                        : T( "MissingFile" ), p );
 		fail( msg );
 	}
 	rc = ui_view( title, l, nl, buttons, n, 0 );
@@ -274,12 +274,12 @@ static void show_license( const char *value, const char **buttons )
 		sprintf( name_buf, "%.*s", name_len, name );
 		if ( name_len )
 			sprintf( title, "%.70s - %.*s",
-				T( "LicenseTitle", "License agreement" ), name_len, name );
+				T( "LicenseTitle" ), name_len, name );
 		else
-			sprintf( title, "%.119s", T( "LicenseTitle", "License agreement" ) );
+			sprintf( title, "%.119s", T( "LicenseTitle" ) );
 	} else {
 		sprintf( file, "%.79s", value );
-		sprintf( title, "%.119s", T( "LicenseTitle", "License agreement" ) );
+		sprintf( title, "%.119s", T( "LicenseTitle" ) );
 	}
 	known = *name_buf || license_id( file, &len, &sum ) == 0;
 	for ( i = 0; known && i < naccepted; i++ )
@@ -320,8 +320,8 @@ void license( void )
 	const char *value;
 	static const char *b[2];
 	int pos = 0, count = 0;
-	b[0] = T( "Accept", "I accept" );
-	b[1] = T( "Decline", "Decline" );
+	b[0] = T( "Accept" );
+	b[1] = T( "Decline" );
 	while ( ( pos = ini_next( "Setup", "License", pos, &value ) ) >= 0 ) {
 		if ( is_license_list( value ) ) {
 			const char *p = value;
@@ -337,20 +337,20 @@ void license( void )
 					p++;
 				}
 				if ( number < 1 || number > 9 )
-					fail( T( "LicenseRange", "License numbers must be between 1 and 9." ) );
+					fail( T( "LicenseRange" ) );
 				if ( ++count > 9 )
-					fail( T( "LicenseLimit", "A package may contain at most 9 licenses." ) );
+					fail( T( "LicenseLimit" ) );
 				sprintf( key, "License%d", number );
 				value = ini_get( "Setup", key, NULL );
 				if ( !value ) {
-					sprintf( msg, "%s %s", T( "MissingLicense", "License entry not found:" ), key );
+					sprintf( msg, "%s %s", T( "MissingLicense" ), key );
 					fail( msg );
 				}
 				show_license( value, b );
 			}
 		} else {
 			if ( ++count > 9 )
-				fail( T( "LicenseLimit", "A package may contain at most 9 licenses." ) );
+				fail( T( "LicenseLimit" ) );
 			show_license( value, b );
 		}
 	}
@@ -362,8 +362,8 @@ void welcome( void )
 	static char text[1200];
 	static const char *b[2];
 	int pos = 0;
-	b[0] = T( "Continue", "Continue" );
-	b[1] = T( "Exit", "Exit" );
+	b[0] = T( "Continue" );
+	b[1] = T( "Exit" );
 	text[0] = 0;
 	/* the lines of a paragraph are joined, empty lines separate paragraphs */
 	while ( ( pos = ini_text( "Welcome", pos, &v ) ) >= 0 && strlen( text ) + strlen( v ) < sizeof(text) - 3 ) {
@@ -380,8 +380,8 @@ void welcome( void )
 	while ( ( pos = strlen( text ) ) > 0 && text[pos - 1] == '\n' )
 		text[pos - 1] = 0;
 	if ( !text[0] )
-		sprintf( text, "%s %s.", T( "WelcomeText", "This program installs" ), ini_get( "Setup", "Product", "the software" ) );
-	if ( ui_message( T( "WelcomeTitle", "Welcome" ), text, b, 2, 0, 0 ) != 0 )
+		sprintf( text, "%s %s.", T( "WelcomeText" ), ini_get( "Setup", "Product", "the software" ) );
+	if ( ui_message( T( "WelcomeTitle" ), text, b, 2, 0, 0 ) != 0 )
 		abort_setup();
 }
 
@@ -420,11 +420,11 @@ void ask_options( void )
 	char title[90];
 	if ( !nopt )
 		return;
-	sprintf( title, "%.40s", T( "OptionsTitle", "Options" ) );
+	sprintf( title, "%.40s", T( "OptionsTitle" ) );
 	if ( in_batch )   /* [Installer]: which package */
 		sprintf( title + strlen( title ), " - %.45s", ini_get( "Setup", "Product", "" ) );
 	if ( ui_checklist( title,
-		T( "OptionsText", "Select the parts to install (Space switches on/off):" ), opt_label, opt_on, nopt ) )
+		T( "OptionsText" ), opt_label, opt_on, nopt ) )
 		abort_setup();
 }
 
@@ -436,19 +436,19 @@ void ask_dirs( void )
 	if ( in_batch ) {   /* [Installer]: the default directory, no questions */
 		gdi_note_parents( dest, dest_top );
 		if ( mkdirs( dest ) )
-			fail( T( "DirError", "Please enter a full path (e.g. C:\\DRIVERS) that can be created." ) );
+			fail( T( "DirError" ) );
 		find_dest();
 		return;
 	}
 	for ( ;; ) {
-		if ( ui_input( T( "DirTitle", "Destination" ), T( "DirText", "Install the files to this directory:" ), dest, 64 ) )
+		if ( ui_input( T( "DirTitle" ), T( "DirText" ), dest, 64 ) )
 			abort_setup();
 		gdi_note_parents( dest, dest_top );
 		if ( strlen( dest ) >= 3 && dest[1] == ':' && dest[2] == '\\' && !mkdirs( dest ) )
 			break;
 		{
 			static const char *ok[] = { "OK" };
-			ui_message( T( "ErrorTitle", "Error" ), T( "DirError", "Please enter a full path (e.g. C:\\DRIVERS) that can be created." ), ok, 1, 0, 1 );
+			ui_message( T( "ErrorTitle" ), T( "DirError" ), ok, 1, 0, 1 );
 		}
 	}
 	find_dest();
@@ -456,8 +456,8 @@ void ask_dirs( void )
 		has_entry( "Win.ini", "Set" ) || has_progman() ||
 		ini_lines( "Registry", 0, &value ) >= 0 || hexpatch_needs_windows() ) {
 		find_windows();
-		if ( ui_input( T( "WinTitle", "Windows" ),
-			T( "WinText", "Windows directory for the SYSTEM.INI entries (empty: no Windows):" ), windir, 64 ) )
+		if ( ui_input( T( "WinTitle" ),
+			T( "WinText" ), windir, 64 ) )
 			abort_setup();
 	}
 }
@@ -470,12 +470,12 @@ int confirm( void )
 	const char *v, *t;
 	char line[160];
 	int key, pos;
-	b[0] = T( "Install", "Install" );
-	b[1] = T( "Cancel", "Cancel" );
+	b[0] = T( "Install" );
+	b[1] = T( "Cancel" );
 	if ( update_mode )
-		b[0] = T( "Update", "Update" );
-	sprintf( text, "%s %s\n", update_mode ? T( "SumUpdateFiles", "Update the files in:" ) :
-		T( "SumFiles", "Files to:" ), dest );
+		b[0] = T( "Update" );
+	sprintf( text, "%s %s\n", update_mode ? T( "SumUpdateFiles" ) :
+		T( "SumFiles" ), dest );
 	pos = 0;
 	while ( ( pos = ini_next( "Config.sys", "Add", pos, &v ) ) >= 0 )
 		if ( ( t = cond_new( "Config.sys", "Add", v ) ) != NULL ) {
@@ -531,7 +531,7 @@ int confirm( void )
 				gdi_pm_ansi_to_oem( group );   /* shown as a text of the INI */
 				gdi_pm_ansi_to_oem( title );
 				sprintf( text + strlen( text ), "%s %s: %s\n",
-					T( "SumProgMan", "Program Manager" ), group, title );
+					T( "SumProgMan" ), group, title );
 			}
 		}
 	}
@@ -545,7 +545,7 @@ int confirm( void )
 					( key == 0 || file_exists( path ) ) &&
 					strlen( text ) + strlen( path ) + 20 < sizeof(text) )
 					sprintf( text + strlen( text ), "%s: %s\n",
-						T( "SumPatch", "Binary patch" ), path );
+						T( "SumPatch" ), path );
 			}
 	pos = 0;
 	while ( !update_mode && ( pos = ini_next( "HexPatch", "PatchVariant", pos, &v ) ) >= 0 )
@@ -554,15 +554,15 @@ int confirm( void )
 			if ( !patch_variant_split( t, &variant ) &&
 				strlen( text ) + strlen( variant.path ) + 40 < sizeof(text) )
 				sprintf( text + strlen( text ), "%s (%s): %s\n",
-					T( "SumPatch", "Binary patch" ), variant.label, variant.path );
+					T( "SumPatch" ), variant.label, variant.path );
 		}
 	if ( update_mode ) {
 		strcat( text, "\n" );
-		strcat( text, T( "SumUpdateKeep", "Existing entries and the settings files of the program stay as they are." ) );
+		strcat( text, T( "SumUpdateKeep" ) );
 	} else
-		strcat( text, T( "SumBackup", "\nThe original files are kept as *.G01, *.G02, ..." ) );
-	return ui_message( update_mode ? T( "SumUpdateTitle", "Ready to update" ) :
-		T( "SumTitle", "Ready to install" ), text, b, 2, 0, 0 ) == 0;
+		strcat( text, T( "SumBackup" ) );
+	return ui_message( update_mode ? T( "SumUpdateTitle" ) :
+		T( "SumTitle" ), text, b, 2, 0, 0 ) == 0;
 }
 
 /* is %NAME% used in an active line of the configuration sections? */

@@ -91,8 +91,8 @@ static void reboot( void )
 void ask_reboot( const char *text )
 {
 	static const char *b[1];
-	b[0] = T( "Restart", "Restart" );
-	ui_message( T( "RestartTitle", "Restart" ), text, b, 1, 0, 0 );
+	b[0] = T( "Restart" );
+	ui_message( T( "RestartTitle" ), text, b, 1, 0, 0 );
 	ui_exit();
 	reboot();
 }
@@ -103,25 +103,25 @@ void dos_prepare( void )
 	static const char *b[2];
 	char msg[300];
 	int st;
-	b[1] = T( "Exit", "Exit" );
+	b[1] = T( "Exit" );
 	_harderr( harderr_fail );
 	while ( ( st = drive_state( boot[0] ) ) != 0 ) {
 		ui_clear();
 		if ( st == 2 ) {
-			b[0] = T( "StartFdisk", "Start FDISK" );
-			sprintf( msg, T( "FdiskText", "There is no drive %s yet. FDISK starts now: create a primary DOS partition (and make it active), then leave FDISK. The computer restarts and Setup continues." ), boot );
-			if ( ui_message( T( "DiskSetupTitle", "Hard disk" ), msg, b, 2, 0, 0 ) )
+			b[0] = T( "StartFdisk" );
+			sprintf( msg, T( "FdiskText" ), boot );
+			if ( ui_message( T( "DiskSetupTitle" ), msg, b, 2, 0, 0 ) )
 				abort_setup();
 			run_program( ini_get( "Setup", "Fdisk", "FDISK.EXE" ) );
 			if ( drive_state( boot[0] ) == 2 ) {
-				sprintf( msg, T( "RestartText", "The computer must restart now. Leave the setup disk in drive %c:, Setup continues afterwards." ), srcdir[0] );
+				sprintf( msg, T( "RestartText" ), srcdir[0] );
 				ask_reboot( msg );
 			}
 		} else {
 			char cmd[100];
-			b[0] = T( "StartFormat", "Format" );
-			sprintf( msg, T( "FormatText", "Drive %s is not formatted yet. Format it now? All data on it is lost." ), boot );
-			if ( ui_message( T( "DiskSetupTitle", "Hard disk" ), msg, b, 2, 0, 0 ) )
+			b[0] = T( "StartFormat" );
+			sprintf( msg, T( "FormatText" ), boot );
+			if ( ui_message( T( "DiskSetupTitle" ), msg, b, 2, 0, 0 ) )
 				abort_setup();
 			sprintf( cmd, "%s", ini_get( "Setup", "Format", "FORMAT.COM %BOOT%" ) );
 			run_program( cmd );

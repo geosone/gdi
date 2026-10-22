@@ -330,8 +330,8 @@ int ui_input( const char *title, const char *text, char *buf, int max )
     static const char *b[2];
     HWND window, edit;
     int height, y, bh, rc;
-    b[0] = gdi_text( "OK", "OK" );
-    b[1] = gdi_text( "Cancel", "Cancel" );
+    b[0] = gdi_text( "OK" );
+    b[1] = gdi_text( "Cancel" );
     height = text_height( ansi( text ), WIDTH - 2 * MARGIN );
     if ( height > TEXTMAX )
         height = TEXTMAX;
@@ -416,8 +416,8 @@ int ui_checklist( const char *title, const char *text, const char **items, char 
     static const char *b[2];
     HWND window, list;
     int height, rows = n < 14 ? n : 14, y, bh, i, rc;
-    b[0] = gdi_text( "OK", "OK" );
-    b[1] = gdi_text( "Cancel", "Cancel" );
+    b[0] = gdi_text( "OK" );
+    b[1] = gdi_text( "Cancel" );
     height = text_height( ansi( text ), WIDTH - 2 * MARGIN );
     if ( height > TEXTMAX / 2 )
         height = TEXTMAX / 2;

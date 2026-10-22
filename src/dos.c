@@ -36,17 +36,20 @@ static void usage( void )
 	        "  /U    removes the installation (run INSTALL.EXE in the target directory)\n"
 	        "  /B:d: drive of the system to change (CONFIG.SYS, AUTOEXEC.BAT),\n"
 	        "        default: the boot drive\n"
+	        "  /L:   the texts: a section of language.ini (English, German, ...)\n"
 	        "  /O:   initial option states, e.g. /O:1010 (used by Windows setup)\n"
 	        "  /W:   write completion status for the Windows setup frontend\n"
 	        "  /R:   write its expanded registry plan (internal)\n"
 	        "  /F:   registry family: 31 or 9X (internal)\n"
 	        "  /T:   write the WIN.INI and Program Manager plan (internal)\n"
+	        "  /P:b  /W:b.STS /R:b.REG /T:b.TSK (internal)\n"
 	        "  /K    keep the uninstaller until native cleanup (internal)\n" );
 }
 
 int main( int argc, char **argv )
 {
 	char ini[80], *s;
+	const char *language = NULL;
 	int i;
 
 	gdi_self = argv[0];
@@ -65,10 +68,23 @@ int main( int argc, char **argv )
 			else if ( toupper( argv[i][1] ) == 'B' && argv[i][2] == ':' && isalpha( argv[i][3] ) ) {
 				boot[0] = toupper( argv[i][3] );
 				bootset = 1;
+			} else if ( toupper( argv[i][1] ) == 'L' && argv[i][2] == ':' ) {
+				language = argv[i] + 3;
 			} else if ( toupper( argv[i][1] ) == 'O' && argv[i][2] == ':' ) {
 				option_override = argv[i] + 3;
 			} else if ( toupper( argv[i][1] ) == 'W' && argv[i][2] == ':' && argv[i][3] ) {
 				sprintf( completion_file, "%.79s", argv[i] + 3 );
+				if ( !completion_registered ) {
+					atexit( write_completion );
+					completion_registered = 1;
+				}
+			} else if ( toupper( argv[i][1] ) == 'P' && argv[i][2] == ':' && argv[i][3] &&
+				strlen( argv[i] + 3 ) < 75 ) {
+				/* /P:base = /W:base.STS /R:base.REG /T:base.TSK (a DOS command
+				 * line has 127 characters) */
+				sprintf( completion_file, "%s.STS", argv[i] + 3 );
+				sprintf( registry_plan_file, "%s.REG", argv[i] + 3 );
+				sprintf( task_plan_file, "%s.TSK", argv[i] + 3 );
 				if ( !completion_registered ) {
 					atexit( write_completion );
 					completion_registered = 1;
@@ -106,6 +122,8 @@ int main( int argc, char **argv )
 		printf( "INSTALL: %s not found\n", ini );
 		return 2;
 	}
+	if ( language )
+		gdi_text_language( language );
 	if ( *registry_plan_file ) {
 		char registry_error[130];
 		if ( !registry_family ) {

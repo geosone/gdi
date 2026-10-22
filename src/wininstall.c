@@ -15,6 +15,7 @@
 #include <direct.h>
 #include <dos.h>
 #include "gdi.h"
+#include "ui.h"
 #include "regtxn.h"
 #include "winreg16.h"
 #include "wintasks.h"
@@ -349,8 +350,7 @@ static void read_package( void )
 
     if ( uninstall_mode ) {
         sprintf( welcome_text, "%.999s",
-                 ini_get( "Text", "UninstText",
-                 "Remove the installation and restore its previous system settings?" ) );
+                 gdi_text( "UninstText" ) );
         option_count = 0;
         has_automatic = 0;
         return;
@@ -403,14 +403,13 @@ static void find_update( void )
     has_automatic = 0;
     for ( i = 0; i < option_count && bits[i]; i++ )
         option_on[i] = bits[i] == '1';
-    sprintf( welcome_text, ini_get( "Text", "UpdateText",
-             "%s is already installed in %s. Setup replaces its files; the system settings and the settings files of the program stay as they are." ),
+    sprintf( welcome_text, gdi_text( "UpdateText" ),
              product, value );
     if ( *version || *ini_get( "Setup", "Version", "" ) )
         sprintf( welcome_text + strlen( welcome_text ), "\r\n\r\n%s %.20s\r\n%s %.20s",
-                 ini_get( "Text", "UpdateOld", "Installed version:" ),
+                 gdi_text( "UpdateOld" ),
                  *version ? version : "?",
-                 ini_get( "Text", "UpdateNew", "New version:" ),
+                 gdi_text( "UpdateNew" ),
                  *ini_get( "Setup", "Version", "" ) ? ini_get( "Setup", "Version", "" ) : "?" );
 }
 
@@ -477,15 +476,19 @@ static void start_dos_setup( HWND window )
     }
     bits[option_count] = 0;
     if ( uninstall_mode )
-        wsprintf( command, "%s /U /K /W:\"%s\" \"%s\"",
-                  (LPSTR)engine_path, (LPSTR)completion_path,
+        wsprintf( command, "%s /L:%s /U /K /W:\"%s\" \"%s\"",
+                  (LPSTR)engine_path, (LPSTR)gdi_text_name(), (LPSTR)completion_path,
                   (LPSTR)package_ini );
     else
-        wsprintf( command,
-                  "%s /O:%s /W:\"%s\" /R:\"%s\" /T:\"%s\" /F:%s \"%s\"",
-                  (LPSTR)engine_path, (LPSTR)bits, (LPSTR)completion_path,
-                  (LPSTR)registry_plan_path, (LPSTR)task_plan_path,
-                  (LPSTR)( win9x ? "9X" : "31" ), (LPSTR)package_ini );
+    {   /* /P: the plans are named like the engine (temp_paths) */
+        char base[128], *dot;
+        strcpy( base, engine_path );
+        if ( ( dot = strrchr( base, '.' ) ) != NULL )
+            *dot = 0;
+        wsprintf( command, "%s /L:%s /O:%s /F:%s /P:%s \"%s\"",
+                  (LPSTR)engine_path, (LPSTR)gdi_text_name(), (LPSTR)bits,
+                  (LPSTR)( win9x ? "9X" : "31" ), (LPSTR)base, (LPSTR)package_ini );
+    }
     result = WinExec( command, SW_SHOWNORMAL );
     if ( result <= 32 ) {
         char error[120];
@@ -667,11 +670,11 @@ static long FAR PASCAL window_proc( HWND window, UINT message,
                       18, 62, 540, 60, 0 );
         if ( has_automatic )
             make_control( window, "STATIC",
-                          ini_get( "Text", "WinAuto", "Three-state choices use automatic package detection." ),
+                          gdi_text( "WinAuto" ),
                           SS_LEFT, 18, 124, 540, 18, 0 );
         rows = option_count > 8 ? 8 : option_count;
         group_height = rows * 22 + 30;
-        make_control( window, "BUTTON", ini_get( "Text", "OptionsTitle", "Components" ),
+        make_control( window, "BUTTON", gdi_text( "OptionsTitle" ),
                       BS_GROUPBOX, 12, 144, 552, group_height, 0 );
         for ( i = 0; i < option_count; i++ ) {
             int column = i / 8;
@@ -688,13 +691,13 @@ static long FAR PASCAL window_proc( HWND window, UINT message,
         }
         button_y = 154 + group_height;
         install_window = make_control( window, "BUTTON",
-                      uninstall_mode ? ini_get( "Text", "Remove", "Remove" ) :
-                      update_mode ? ini_get( "Text", "Update", "Update" ) :
-                      ini_get( "Text", "Install", "Start setup" ),
+                      uninstall_mode ? gdi_text( "Remove" ) :
+                      update_mode ? gdi_text( "Update" ) :
+                      gdi_text( "Install" ),
                       BS_DEFPUSHBUTTON | WS_TABSTOP, 350, button_y,
                       100, 26, ID_INSTALL );
         cancel_window = make_control( window, "BUTTON",
-                      ini_get( "Text", "Cancel", "Cancel" ),
+                      gdi_text( "Cancel" ),
                       BS_PUSHBUTTON | WS_TABSTOP, 462, button_y,
                       90, 26, ID_CANCEL );
         return 0;
@@ -803,8 +806,7 @@ int PASCAL WinMain( HINSTANCE instance, HINSTANCE previous,
     }
 
     if ( !stricmp( ini_get( "Setup", "Windows", "yes" ), "no" ) ) {
-        MessageBox( NULL, ini_get( "Text", "NeedDos",
-                    "Please quit Windows and run this setup from MS-DOS." ),
+        MessageBox( NULL, gdi_text( "NeedDos" ),
                     ini_get( "Setup", "Title", "Setup" ), MB_OK | MB_ICONINFORMATION );
         ini_free();
         release_source_path();

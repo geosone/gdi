@@ -8,7 +8,8 @@ Clone recursively so the pinned UPX fork and its dependencies are present:
 
 For an existing checkout, run `git submodule update --init --recursive`
 once. Building requires Open Watcom 2.0 (`WATCOM=/opt/watcom`), GNU make,
-CMake, Ninja and a host C++ compiler:
+CMake, Ninja, a host C++ compiler and Python 3 (`tools/mklang.py` makes
+the texts of `src/language.ini` into `build/language.h`):
 
     make            -> build/INSTALL.EXE (packed DOS MZ + packed Win16 NE)
     make docs       -> build/gdi-manual.pdf (pandoc and LuaLaTeX)

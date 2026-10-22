@@ -221,9 +221,25 @@ files; this does not translate the installer itself.
 
 ## Installer texts
 
-All texts of the installer can be replaced in `[Text]`. The keys are the
-first arguments of `T()` and `gdi_text()` in the installer core (`src/*.c`,
-the key bar texts in `src/ui_dos.c`) and of `ini_get( "Text", ...)` in
-`src/wininstall.c` (Windows), for example `WelcomeTitle`, `LicenseTitle`,
-`Accept`, `Decline`, `DirTitle`, `DirText`, `OptionsTitle`, `SumTitle`,
-`Install`, `Cancel`, `DoneTitle`, `DoneText`, `KeysMsg`, `NeedDos`.
+The texts of the installer are in `src/language.ini`, one section per
+language: `[English]` with every text, then `[German]` and further
+languages. A section names the systems it is for with `Country=` (the
+country code of `COUNTRY=` in CONFIG.SYS under DOS, `iCountry=` in `[intl]`
+of WIN.INI under Windows) and `Language=` (`sLanguage=` in `[intl]`). The
+installer takes the section of the system; a text a section lacks, and a
+system no section names, get the English text. A further language is a
+further section; the build makes `build/language.h` from the file.
+
+```ini
+[Setup]
+Texts=German          ; this section of language.ini, whatever the system
+
+[Text]
+DirText=Verzeichnis für die Deinstallationsdaten:
+```
+
+`[Setup] Texts=` chooses the section for a package. `[Text]` replaces single
+texts for a package, with the keys of `src/language.ini`, for example
+`WelcomeTitle`, `LicenseTitle`, `Accept`, `Decline`, `DirTitle`, `DirText`,
+`OptionsTitle`, `SumTitle`, `Install`, `Cancel`, `DoneTitle`, `DoneText`,
+`KeysMsg`, `NeedDos`; `\n` is a new line.

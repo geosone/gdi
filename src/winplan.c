@@ -40,7 +40,7 @@ static void winini_run( int add, const char *program )
 		return;
 	index = ini_find_key( "windows", "run", &end );
 	if ( index == -2 )
-		fail( T( "SetDefinition", "Invalid [System.ini] Set entry." ) );
+		fail( T( "SetDefinition" ) );
 	value[0] = 0;
 	if ( index >= 0 && ( v = strchr( ed[index], '=' ) ) != NULL )
 		sprintf( value, "%.255s", v + 1 );
@@ -87,7 +87,7 @@ static void winini_run( int add, const char *program )
 	}
 	if ( ed_save( path ) ) {
 		char msg[120];
-		sprintf( msg, "%s %s", T( "WriteError", "Cannot write" ), path );
+		sprintf( msg, "%s %s", T( "WriteError" ), path );
 		fail( msg );
 	}
 	ed_free();
@@ -158,18 +158,18 @@ void progman_all( void )
 			continue;
 		rc = progman_item( v, group, title, command, icon, &index );
 		if ( rc < 0 )
-			fail( T( "ProgManDefinition", "Invalid [ProgMan] Item entry." ) );
+			fail( T( "ProgManDefinition" ) );
 		if ( rc )
 			continue;
 		rc = gdi_pm_add_item( windir, group, title, command, icon, index, &created );
 		if ( rc < 0 ) {
-			sprintf( msg, "%s %.80s", T( "ProgManError", "Cannot change the Program Manager group" ), group );
+			sprintf( msg, "%s %.80s", T( "ProgManError" ), group );
 			fail( msg );
 		}
 		if ( rc )
 			continue;   /* already there */
 		if ( !f && !( f = fopen( log, "a" ) ) ) {
-			sprintf( msg, "%s %s", T( "WriteError", "Cannot write" ), log );
+			sprintf( msg, "%s %s", T( "WriteError" ), log );
 			fail( msg );
 		}
 		if ( created )
@@ -197,11 +197,11 @@ void progman_undo( void )
 			if ( pass == 0 && l[0] == 'I' && l[1] == '|' && ( bar = strchr( l + 2, '|' ) ) != NULL ) {
 				*bar = 0;
 				if ( gdi_pm_remove_item( windir, l + 2, bar + 1 ) < 0 )
-					fail( T( "ProgManError", "Cannot change the Program Manager group" ) );
+					fail( T( "ProgManError" ) );
 			}
 			if ( pass == 1 && l[0] == 'G' && l[1] == '|' &&
 				gdi_pm_remove_group( windir, l + 2 ) < 0 )
-				fail( T( "ProgManError", "Cannot change the Program Manager group" ) );
+				fail( T( "ProgManError" ) );
 		}
 		fclose( f );
 	}
@@ -225,7 +225,7 @@ void task_write_plan( void )
 		return;
 	/* [Installer]: one part (Dir=) per package */
 	if ( !( f = fopen( task_plan_file, task_plan_started ? "a" : "w" ) ) )
-		fail( T( "TaskPlanError", "Cannot write the plan for Windows." ) );
+		fail( T( "TaskPlanError" ) );
 	if ( !task_plan_started )
 		fprintf( f, "GDI-TASK-PLAN 1\n" );
 	task_plan_started = 1;
@@ -235,20 +235,20 @@ void task_write_plan( void )
 			if ( !( t = cond_new( "Win.ini", "Set", v ) ) )
 				continue;
 			if ( system_set_split( t, section, key, line ) )
-				fail( T( "SetDefinition", "Invalid [System.ini] Set entry." ) );
+				fail( T( "SetDefinition" ) );
 			gdi_pm_oem_to_ansi( line );
 			fprintf( f, "W|%s|%s\n", section, line );
 		}
 		for ( pos = 0; ( pos = ini_next( "ProgMan", "Item", pos, &v ) ) >= 0; ) {
 			rc = progman_item( v, group, title, command, icon, &index );
 			if ( rc < 0 )
-				fail( T( "ProgManDefinition", "Invalid [ProgMan] Item entry." ) );
+				fail( T( "ProgManDefinition" ) );
 			if ( !rc && entry_new( "ProgMan", "Item", v ) )
 				fprintf( f, "P|%s|%s|%s|%s|%d\n", group, title, command, icon, index );
 		}
 	}
 	if ( fclose( f ) )
-		fail( T( "TaskPlanError", "Cannot write the plan for Windows." ) );
+		fail( T( "TaskPlanError" ) );
 }
 
 static void task_plan_line( char kind, const char *text )
@@ -256,7 +256,7 @@ static void task_plan_line( char kind, const char *text )
 	char line[160];
 	FILE *f = fopen( task_plan_file, task_plan_started ? "a" : "w" );
 	if ( !f )
-		fail( T( "TaskPlanError", "Cannot write the plan for Windows." ) );
+		fail( T( "TaskPlanError" ) );
 	if ( !task_plan_started )
 		fprintf( f, "GDI-TASK-PLAN 1\nDir=%s\nWinDir=%s\n", dest, windir );
 	task_plan_started = 1;
@@ -264,7 +264,7 @@ static void task_plan_line( char kind, const char *text )
 	gdi_pm_oem_to_ansi( line );
 	fprintf( f, "%c|%s\n", kind, line );
 	if ( fclose( f ) )
-		fail( T( "TaskPlanError", "Cannot write the plan for Windows." ) );
+		fail( T( "TaskPlanError" ) );
 }
 
 /* the copy of this installer that does the registry work at the next start
@@ -293,7 +293,7 @@ static void post_runner( int add )
 		path_cat( from, srcdir, "INSTALL.EXE" );
 		if ( stricmp( from, to ) && copy_file( from, to ) ) {
 			char msg[160];
-			sprintf( msg, "%s %s -> %s", T( "CopyError", "Cannot copy" ), from, to );
+			sprintf( msg, "%s %s -> %s", T( "CopyError" ), from, to );
 			fail( msg );
 		}
 	}
@@ -351,13 +351,13 @@ void run_windows( void )
 		if ( !f ) {
 			path_cat( p, dest, "RUNONCE.PLN" );
 			if ( !( f = fopen( p, "w" ) ) )
-				fail( T( "WriteError", "Cannot write" ) );
+				fail( T( "WriteError" ) );
 		}
 		fprintf( f, "%s\n", command );
 	}
 	if ( f ) {
 		if ( fclose( f ) )
-			fail( T( "WriteError", "Cannot write" ) );
+			fail( T( "WriteError" ) );
 		add_runner();
 	}
 }
@@ -381,7 +381,7 @@ int uninstall_registry( void )
 	}
 	path_cat( p, dest, "UNINST.PND" );
 	if ( !( f = fopen( p, "w" ) ) || fclose( f ) )
-		fail( T( "WriteError", "Cannot write" ) );
+		fail( T( "WriteError" ) );
 	post_runner( 1 );
 	return 1;
 }

@@ -9,12 +9,12 @@ UPX := $(UPX_BUILD)/upx
 
 CC   := $(WATCOM)/binl/wcc
 LINK := $(WATCOM)/binl/wlink
-COPT := -q -bt=dos -ms -0 -os -s -zq -wx -I$(WATCOM)/h
-WCOPT := -q -bt=windows -ml -zt100 -0 -zW -os -s -zq -w4 -we -I$(WATCOM)/h -I$(WATCOM)/h/win
+COPT := -q -bt=dos -mm -0 -os -s -zq -wx -I$(WATCOM)/h -I$(OUT)
+WCOPT := -q -bt=windows -ml -zt100 -0 -zW -os -s -zq -w4 -we -I$(WATCOM)/h -I$(WATCOM)/h/win -I$(OUT)
 
-OBJS := $(addprefix $(OUT)/,dos.obj core.obj sysfiles.obj winplan.obj steps.obj files.obj setup.obj combined.obj dossys.obj util.obj journal.obj ui_dos.obj ini.obj archive.obj hexpatch.obj regtxn.obj progman.obj)
+OBJS := $(addprefix $(OUT)/,dos.obj core.obj sysfiles.obj winplan.obj steps.obj files.obj setup.obj combined.obj dossys.obj lang.obj util.obj journal.obj ui_dos.obj ini.obj archive.obj hexpatch.obj regtxn.obj progman.obj)
 # the installer core, compiled for the Windows frontend as well
-WINCORE := core sysfiles winplan steps files setup combined archive hexpatch progman
+WINCORE := core sysfiles winplan steps files setup combined archive hexpatch progman lang
 WINOBJS := $(OUT)/wininstall.obj $(OUT)/winnative.obj $(OUT)/winsys.obj $(OUT)/ui_win16.obj \
 	$(addprefix $(OUT)/w_,$(addsuffix .obj,$(WINCORE))) \
 	$(OUT)/winutil.obj $(OUT)/winjournal.obj $(OUT)/winini.obj $(OUT)/winregtxn.obj $(OUT)/winreg16.obj $(OUT)/wintasks.obj
@@ -31,6 +31,12 @@ $(OUT):
 
 $(OUT)/%.obj: src/%.c src/gdi.h src/ui.h src/core.h src/hexpatch.h | $(OUT)
 	$(CC) $(COPT) -fo=$@ $<
+
+# the texts of the installer (src/language.ini); the check needs the sources
+$(OUT)/language.h: src/language.ini tools/mklang.py $(wildcard src/*.c) | $(OUT)
+	python3 tools/mklang.py src/language.ini $@ $(wildcard src/*.c)
+
+$(OUT)/lang.obj $(OUT)/w_lang.obj: $(OUT)/language.h
 
 $(DOSIMAGE): $(OBJS)
 	$(LINK) option quiet format dos name $@ option map=$(OUT)/INSTALL.map \

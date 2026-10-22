@@ -22,6 +22,14 @@ cp "$IMG" "$OUT/hd.img"; P="$OUT/hd.img@@32256"
 crlf() { sed 's/$/\r/'; }
 cp "$ROOT/build/INSTALL.EXE" "$OUT/src/"
 cp "$ROOT/test/TESTPM.INI" "$OUT/src/INSTALL.INI"
+# COUNTRY=049: COUNTRY= in CONFIG.SYS (COUNTRYSYS: the COUNTRY.SYS of the DOS
+# in the image) and the texts of the system's language, German: E=Entfernen
+R=r
+if [ -n "${COUNTRY:-}" ]; then
+    COUNTRYSYS=${COUNTRYSYS:-$HOME/Iso/MSDOS-WfW/MS-Dos 7.1/Disk1/COUNTRY.SYS}
+    sed -i '/^Texts=English/d' "$OUT/src/INSTALL.INI"
+    R=e
+fi
 # ENGINE=1: [Detect] needs the DOS engine, the frontend starts it
 [ -n "${ENGINE:-}" ] && printf '\r\n[Detect]\r\nGDITRUE=TESTTOOL.COM\r\n' >> "$OUT/src/INSTALL.INI"
 printf '\xcd\x20' > "$OUT/src/TESTTOOL.COM"
@@ -39,6 +47,11 @@ mmd -i "$P" ::/SRC 2>/dev/null
 mcopy -o -i "$P" "$OUT"/src/* ::/SRC/ || exit 1
 mcopy -o -i "$P" "$OUT/ORIG.TXT" ::/WINDOWS/REPL.TXT
 mcopy -o -i "$P" "$OUT/EXITWIN.EXE" ::/
+if [ -n "${COUNTRY:-}" ]; then
+    mcopy -o -i "$P" "$COUNTRYSYS" ::/COUNTRY.SYS || exit 1
+    { mtype -i "$P" ::/CONFIG.SYS | tr -d '\r'; echo "COUNTRY=$COUNTRY,850,C:\COUNTRY.SYS"; } | crlf > "$OUT/CONFIG.SYS"
+    mcopy -o -i "$P" "$OUT/CONFIG.SYS" ::/
+fi
 
 # one run: AUTOEXEC.BAT = $1 (| separated), keys, screens $2-N.png
 run() {
@@ -81,7 +94,7 @@ if [ -n "${UPDATE:-}" ]; then
     fi
     fetch 2-updated
     mcopy -o -i "$P" ::/GDI.INI "$OUT/files/2-updated/" 2>/dev/null
-    run 'C:\PMTEST\INSTALL.EXE /U' uninst "r ret ret ret"
+    run 'C:\PMTEST\INSTALL.EXE /U' uninst "$R ret ret ret"
     fetch 3-removed
     mcopy -o -i "$P" ::/GDI.INI "$OUT/files/3-removed/" 2>/dev/null
 elif [ -n "${FRONTEND:-}" ]; then
@@ -93,9 +106,9 @@ elif [ -n "${FRONTEND:-}" ]; then
     # DDE), the registry right away
     W='@ECHO OFF|PATH C:\;C:\WINDOWS|C:\WINDOWS\WIN C:\EXITWIN.EXE 100'
     if [ -n "${ENGINE:-}" ]; then
-        KEYS_IN="ret ret ret ret ret ret ret ret" KEYS_UN="ret r ret ret"
+        KEYS_IN="ret ret ret ret ret ret ret ret" KEYS_UN="ret $R ret ret"
     else
-        KEYS_IN="ret ret ret ret ret ret" KEYS_UN="r ret"
+        KEYS_IN="ret ret ret ret ret ret" KEYS_UN="$R ret"
     fi
     TIMEOUT=${TIMEOUT:-80} run "$W C:\SRC\INSTALL.EXE" install "$KEYS_IN"
     fetch 1-installed
@@ -107,7 +120,7 @@ else
     fetch 1-installed
     run '@ECHO OFF|PATH C:\;C:\WINDOWS|C:\WINDOWS\WIN C:\EXITWIN.EXE 30' windows ""
     fetch 2-windows
-    run 'C:\PMTEST\INSTALL.EXE /U' uninst "r ret ret ret"
+    run 'C:\PMTEST\INSTALL.EXE /U' uninst "$R ret ret ret"
     fetch 3-removed
     run '@ECHO OFF|PATH C:\;C:\WINDOWS|C:\WINDOWS\WIN C:\EXITWIN.EXE 30' windows2 ""
     fetch 4-windows

@@ -42,13 +42,13 @@ int gdi_ask_disk( int n )
 	static const char *b[2];
 	char key[4], msg[200];
 	int rc;
-	b[0] = T( "OK", "OK" );
-	b[1] = T( "Cancel", "Cancel" );
+	b[0] = T( "OK" );
+	b[1] = T( "Cancel" );
 	sprintf( key, "%d", n );
-	sprintf( msg, T( "InsertDisk", "Please insert disk %d into drive %c:" ), n, srcdir[0] );
+	sprintf( msg, T( "InsertDisk" ), n, srcdir[0] );
 	if ( ini_get( "Disks", key, NULL ) )
 		sprintf( msg + strlen( msg ), "\n\n%s", ini_get( "Disks", key, "" ) );
-	rc = ui_message( T( "DiskTitle", "Next disk" ), msg, b, 2, 0, 0 );
+	rc = ui_message( T( "DiskTitle" ), msg, b, 2, 0, 0 );
 	ui_clear();
 	ui_progress( progtitle, "", 0, 1 );
 	return rc != 0;
@@ -107,16 +107,16 @@ void find_update( void )
 	path_cat( p, dir, "INSTALL.INI" );
 	if ( !file_exists( p ) )
 		return;
-	sprintf( text, T( "UpdateText", "%s is already installed in %s. Setup replaces its files; the system settings and the settings files of the program stay as they are." ),
+	sprintf( text, T( "UpdateText" ),
 		ini_get( "Setup", "Product", "The software" ), dir );
 	if ( *old_version || *version )
 		sprintf( text + strlen( text ), "\n\n%s %s\n%s %s",
-			T( "UpdateOld", "Installed version:" ), *old_version ? old_version : "?",
-			T( "UpdateNew", "New version:" ), *version ? version : "?" );
-	b[0] = T( "Update", "Update" );
-	b[1] = T( "Cancel", "Cancel" );
+			T( "UpdateOld" ), *old_version ? old_version : "?",
+			T( "UpdateNew" ), *version ? version : "?" );
+	b[0] = T( "Update" );
+	b[1] = T( "Cancel" );
 	ui_clear();
-	if ( !in_batch && ui_message( T( "UpdateTitle", "Update" ), text, b, 2, 0, 0 ) != 0 )
+	if ( !in_batch && ui_message( T( "UpdateTitle" ), text, b, 2, 0, 0 ) != 0 )
 		abort_setup();
 	update_mode = 1;
 	strcpy( dest, dir );
@@ -320,7 +320,7 @@ void copy_all( void )
 	int pos = 0, total = 0, done = 0, i;
 	int unin = !stricmp( ini_get( "Setup", "Uninstall", dosmode ? "no" : "yes" ), "yes" );
 
-	progtitle = T( "CopyTitle", "Copying files" );
+	progtitle = T( "CopyTitle" );
 	if ( unin ) {
 		path_cat( to, dest, "INSTALL.LOG" );
 		old_log_load( to );
@@ -366,7 +366,7 @@ void copy_all( void )
 		log_file( to );
 		if ( copy_file( from, to ) ) {
 			char msg[160];
-			sprintf( msg, "%s %s -> %s", T( "CopyError", "Cannot copy" ), from, to );
+			sprintf( msg, "%s %s -> %s", T( "CopyError" ), from, to );
 			fail( msg );
 		}
 	}
@@ -378,7 +378,7 @@ void copy_all( void )
 			log_file( finds[i].path );
 			if ( copy_file( from, finds[i].path ) ) {
 				char msg[160];
-				sprintf( msg, "%s %s -> %s", T( "CopyError", "Cannot copy" ), from, finds[i].path );
+				sprintf( msg, "%s %s -> %s", T( "CopyError" ), from, finds[i].path );
 				fail( msg );
 			}
 		}
@@ -404,11 +404,11 @@ void copy_all( void )
 			if ( !strcmp( err, "Cancelled" ) )
 				abort_setup();
 			if ( !strcmp( err, "CreateError" ) )
-				sprintf( msg, "%s %s", T( "CopyError", "Cannot copy" ), arc_errfile() );
+				sprintf( msg, "%s %s", T( "CopyError" ), arc_errfile() );
 			else if ( !strcmp( err, "CrcError" ) || !strcmp( err, "BadArchive" ) || !strcmp( err, "ReadError" ) )
-				sprintf( msg, "%s (%s)", T( "DiskError", "The disk is damaged or not readable." ), progname );
+				sprintf( msg, "%s (%s)", T( "DiskError" ), progname );
 			else
-				sprintf( msg, "%s", T( err, err ) );
+				sprintf( msg, "%s", T( err ) );
 			fail( msg );
 		}
 	}
@@ -439,7 +439,7 @@ void run_all( const char *key )
 	while ( ( pos = ini_next( "Run", key, pos, &v ) ) >= 0 )
 		if ( ( t = cond( v ) ) != NULL && run_program( t ) == -1 ) {
 			char msg[160];
-			sprintf( msg, "%s %s", T( "RunError", "Cannot run" ), t );
+			sprintf( msg, "%s %s", T( "RunError" ), t );
 			fail( msg );
 		}
 }
@@ -467,9 +467,9 @@ void remove_all( void )
 	char p[80], name[40];
 	int pos = 0, had_log = 0, pending;
 	static const char *b[2];
-	b[0] = T( "Remove", "Remove" );
-	b[1] = T( "Cancel", "Cancel" );
-	if ( ui_message( T( "UninstTitle", "Remove" ), T( "UninstText", "Remove the installation from this directory and its entries from CONFIG.SYS, AUTOEXEC.BAT and SYSTEM.INI?" ), b, 2, 1, 0 ) != 0 )
+	b[0] = T( "Remove" );
+	b[1] = T( "Cancel" );
+	if ( ui_message( T( "UninstTitle" ), T( "UninstText" ), b, 2, 1, 0 ) != 0 )
 		abort_setup();
 	strcpy( dest, srcdir );
 	for ( pos = 0; pos < MAXOPT; pos++ )

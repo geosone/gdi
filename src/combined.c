@@ -130,10 +130,10 @@ static void read_installers( void )
 			if ( id[k] == '=' || id[k] == '[' || id[k] == ';' )
 				id[k] = '_';
 		if ( !file_exists( ini ) ) {
-			sprintf( label, "%s (%s)", product, T( "InstMissing", "missing" ) );
+			sprintf( label, "%s (%s)", product, T( "InstMissing" ) );
 			inst_on[ninst] = 0;
 		} else if ( record_read_key( id, d2, bits, version ) )
-			sprintf( label, "%s (%s)", product, T( "InstInstalled", "installed" ) );
+			sprintf( label, "%s (%s)", product, T( "InstInstalled" ) );
 		else
 			strcpy( label, product );
 		inst_path[ninst] = str_dup( v );
@@ -154,13 +154,13 @@ void run_installers( void )
 	if ( !ninst )
 		return;
 	if ( stricmp( ini_get( "Installer", "Select", "yes" ), "no" ) &&
-		ui_checklist( T( "InstTitle", "Packages" ),
-		T( "InstText", "Select the packages to install (Space switches on/off):" ), (const char **)inst_label, inst_on, ninst ) )
+		ui_checklist( T( "InstTitle" ),
+		T( "InstText" ), (const char **)inst_label, inst_on, ninst ) )
 		abort_setup();
 	ui_clear();
 	find_windows();
-	if ( ui_input( T( "WinTitle", "Windows" ),
-		T( "WinText", "Windows directory for the SYSTEM.INI entries (empty: no Windows):" ), windir, 64 ) )
+	if ( ui_input( T( "WinTitle" ),
+		T( "WinText" ), windir, 64 ) )
 		abort_setup();
 	strcpy( maindir, srcdir );
 	strcpy( mainwin, windir );
@@ -207,15 +207,15 @@ void run_installers( void )
 		}
 	strcpy( registry_plan_file, plan );
 	option_override = saved_override;
-	sprintf( text, T( "InstDone", "%d packages are installed." ), done );
+	sprintf( text, T( "InstDone" ), done );
 	for ( i = 0; i < ninst; i++ )
 		if ( inst_on[i] && inst_state[i] != 1 && strlen( text ) + strlen( inst_label[i] ) + 60 < sizeof(text) )
 			sprintf( text + strlen( text ), "\n%s: %s", inst_label[i],
-				inst_state[i] == 3 ? T( "InstCancelled", "cancelled" ) :
-				inst_state[i] == 4 ? T( "InstNeedDos", "only from MS-DOS" ) : T( "InstFailed", "failed" ) );
-	ok[0] = T( "OK", "OK" );
+				inst_state[i] == 3 ? T( "InstCancelled" ) :
+				inst_state[i] == 4 ? T( "InstNeedDos" ) : T( "InstFailed" ) );
+	ok[0] = T( "OK" );
 	ui_clear();
-	ui_message( T( "InstTitle", "Packages" ), text, ok, 1, 0, 0 );
+	ui_message( T( "InstTitle" ), text, ok, 1, 0, 0 );
 }
 
 void finish( void )
@@ -223,21 +223,21 @@ void finish( void )
 	static const char *b[2];
 	const char *readme = ini_get( "Setup", "Readme", NULL );
 	int rc;
-	b[0] = T( "OK", "OK" );
-	b[1] = T( "ShowReadme", "Readme" );
-	rc = ui_message( T( "DoneTitle", "Setup complete" ),
-		uninstall ? T( "UninstDone", "The installation has been removed. Restart the computer to unload the drivers." )
-		          : ini_get( "Setup", "Done", T( "DoneText", "The installation is complete. Restart the computer to load the drivers." ) ),
+	b[0] = T( "OK" );
+	b[1] = T( "ShowReadme" );
+	rc = ui_message( T( "DoneTitle" ),
+		uninstall ? T( "UninstDone" )
+		          : ini_get( "Setup", "Done", T( "DoneText" ) ),
 		b, readme && !uninstall ? 2 : 1, 0, 0 );
 	if ( rc == 1 ) {
 		static const char *ok[1];
-		ok[0] = T( "OK", "OK" );
-		show_text( T( "ReadmeTitle", "Readme" ), readme, ok, 1, 0 );
+		ok[0] = T( "OK" );
+		show_text( T( "ReadmeTitle" ), readme, ok, 1, 0 );
 	}
 	if ( dosmode ) {
 		char msg[200];
 		ui_clear();
-		sprintf( msg, T( "DosDoneText", "Remove the disk from drive %c: and restart the computer." ), srcdir[0] );
+		sprintf( msg, T( "DosDoneText" ), srcdir[0] );
 		ask_reboot( msg );
 	}
 }

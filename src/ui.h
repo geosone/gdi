@@ -19,5 +19,12 @@ int  ui_checklist( const char *title, const char *text, const char **items, char
 /* progress: called with done = 0 first */
 void ui_progress( const char *title, const char *text, long done, long total );
 
-/* the core: a text of INSTALL.INI [Text] (translated), def if it has none */
-const char *gdi_text( const char *key, const char *def );
+/* lang.c: a text of the installer: [Text] of INSTALL.INI, else the text of
+ * the language of the system (src/language.ini), else the English one */
+const char *gdi_text( const char *key );
+/* the section of language.ini, by name (Setup /L:, [Setup] Texts=) */
+int  gdi_text_language( const char *name );
+/* the name of the section in use */
+const char *gdi_text_name( void );
+/* forget the texts in use (the Windows frontend changes the code page) */
+void gdi_text_reset( void );

@@ -48,24 +48,6 @@ int in_batch;                   /* a package of [Installer] */
 int in_extra;                   /* INSTALL.LOG: installed files */
 char selected_language[9] = "en";
 
-/* text of the installer, replaced by [Text] key=...; "\n" = new line */
-const char *T( const char *key, const char *def )
-{
-	char *v = (char *)ini_get( "Text", key, NULL ), *p;
-	if ( !v )
-		return def;
-	while ( ( p = strstr( v, "\\n" ) ) != NULL ) {
-		*p = '\n';
-		memmove( p + 1, p + 2, strlen( p + 2 ) + 1 );
-	}
-	return v;
-}
-
-const char *gdi_text( const char *key, const char *def )
-{
-	return T( key, def );
-}
-
 void write_completion( void )
 {
 	FILE *f;
@@ -452,7 +434,7 @@ int copy_file( const char *from, const char *to )
 void fail( const char *text )
 {
 	static const char *ok[] = { "OK" };
-	ui_message( T( "ErrorTitle", "Error" ), text, ok, 1, 0, 1 );
+	ui_message( T( "ErrorTitle" ), text, ok, 1, 0, 1 );
 	if ( in_extra )
 		longjmp( extra_abort, 2 );
 	completion_status = 2;
@@ -462,13 +444,13 @@ void fail( const char *text )
 
 void gdi_out_of_memory( void )
 {
-	fail( T( "NoMemory", "Not enough memory." ) );
+	fail( T( "NoMemory" ) );
 }
 
 void abort_setup( void )
 {
 	static const char *ok[] = { "OK" };
-	ui_message( T( "AbortTitle", "Setup" ), T( "Aborted", "Setup was cancelled. Nothing was changed." ), ok, 1, 0, 0 );
+	ui_message( T( "AbortTitle" ), T( "Aborted" ), ok, 1, 0, 0 );
 	if ( in_extra )
 		longjmp( extra_abort, 1 );
 	completion_status = 1;

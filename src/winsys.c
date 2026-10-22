@@ -51,8 +51,8 @@ int windows_running( void )
 void ask_reboot( const char *text )
 {
 	static const char *b[1];
-	b[0] = T( "Restart", "Restart" );
-	ui_message( T( "RestartTitle", "Restart" ), text, b, 1, 0, 0 );
+	b[0] = T( "Restart" );
+	ui_message( T( "RestartTitle" ), text, b, 1, 0, 0 );
 	ui_exit();
 	ExitWindows( EW_REBOOTSYSTEM, 0 );
 	exit( 0 );
@@ -61,5 +61,5 @@ void ask_reboot( const char *text )
 /* DOS mode runs only in the DOS engine */
 void dos_prepare( void )
 {
-	fail( T( "NeedDos", "Please quit Windows and run this setup from MS-DOS." ) );
+	fail( T( "NeedDos" ) );
 }

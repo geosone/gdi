@@ -24,6 +24,7 @@ int gdi_native_run( HINSTANCE instance, const char *ini, const char *dir, int re
     ui_instance = instance;
     ini_free();
     ini_keep_oem = 1;
+    gdi_text_reset();   /* the texts in the DOS code page now */
     if ( ini_load( ini ) )
         return 2;
     sprintf( srcdir, "%.79s", dir );

@@ -45,8 +45,8 @@ void ask_language( void )
 		count++;
 	}
 	if ( !count ) return;
-	selected = ui_message( T( "LanguageTitle", "Language" ),
-		T( "LanguageText", "Select the application language to install:" ),
+	selected = ui_message( T( "LanguageTitle" ),
+		T( "LanguageText" ),
 		buttons, count, selected, 0 );
 	if ( selected < 0 ) abort_setup();
 	strcpy( selected_language, codes[selected] );
@@ -174,22 +174,22 @@ void extras( void )
 	strcpy( maindest, dest );
 	strcpy( dir, ini_get( "Setup", "ExtrasDir", "A:\\" ) );
 	for ( ;; ) {
-		b[0] = T( "InstallMore", "Install" );
-		b[1] = T( "Finish", "Finish" );
+		b[0] = T( "InstallMore" );
+		b[1] = T( "Finish" );
 		ui_clear();
-		if ( ui_message( T( "ExtrasTitle", "Additional software" ),
-			T( "ExtrasText", "Do you want to install additional software now (drivers, tools)? Insert its disk or enter the directory that contains its INSTALL.INI." ),
+		if ( ui_message( T( "ExtrasTitle" ),
+			T( "ExtrasText" ),
 			b, 2, 0, 0 ) )
 			break;
 		ui_clear();
-		if ( ui_input( T( "ExtrasTitle", "Additional software" ), T( "ExtrasDirText", "Directory with INSTALL.INI:" ), dir, 64 ) )
+		if ( ui_input( T( "ExtrasTitle" ), T( "ExtrasDirText" ), dir, 64 ) )
 			continue;
 		path_cat( ini, dir, "INSTALL.INI" );
 		if ( !file_exists( ini ) ) {
 			static const char *ok[] = { "OK" };
 			char msg[120];
-			sprintf( msg, "%s %s", T( "MissingFile", "File not found:" ), ini );
-			ui_message( T( "ErrorTitle", "Error" ), msg, ok, 1, 0, 1 );
+			sprintf( msg, "%s %s", T( "MissingFile" ), ini );
+			ui_message( T( "ErrorTitle" ), msg, ok, 1, 0, 1 );
 			continue;
 		}
 		ini_save();
@@ -204,9 +204,9 @@ void extras( void )
 			ui_clear();
 			{
 				static const char *ok[1];
-				ok[0] = T( "OK", "OK" );
-				ui_message( T( "DoneTitle", "Setup complete" ),
-					ini_get( "Setup", "Done", T( "DoneText", "The installation is complete." ) ), ok, 1, 0, 0 );
+				ok[0] = T( "OK" );
+				ui_message( T( "DoneTitle" ),
+					ini_get( "Setup", "Done", T( "DoneText" ) ), ok, 1, 0, 0 );
 			}
 		}
 		in_extra = 0;
@@ -243,7 +243,7 @@ int core_run( void )
 	ui_clear();
 	read_options();
 	if ( !stricmp( ini_get( "Setup", "Windows", "yes" ), "no" ) && windows_running() )
-		fail( T( "NeedDos", "Please quit Windows and run this setup from MS-DOS." ) );
+		fail( T( "NeedDos" ) );
 	if ( uninstall )
 		remove_all();
 	else {
