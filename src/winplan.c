@@ -203,7 +203,7 @@ void progman_all( void )
 	int pos = 0, rc, created, index;
 	if ( frontend() || !*windir )
 		return;
-	path_cat( log, dest, "PROGMAN.LOG" );
+	path_cat( log, jdir, "PROGMAN.LOG" );
 	while ( ( pos = ini_next( "ProgMan", "Item", pos, &v ) ) >= 0 ) {
 		if ( !entry_new( "ProgMan", "Item", v ) )
 			continue;
@@ -239,7 +239,7 @@ void progman_undo( void )
 	int pass;
 	if ( frontend() || !*windir )
 		return;
-	path_cat( log, dest, "PROGMAN.LOG" );
+	path_cat( log, jdir, "PROGMAN.LOG" );
 	for ( pass = 0; pass < 2; pass++ ) {   /* items, then empty groups */
 		if ( !( f = fopen( log, "r" ) ) )
 			return;
@@ -280,7 +280,7 @@ void task_write_plan( void )
 	if ( !task_plan_started )
 		fprintf( f, "GDI-TASK-PLAN 1\n" );
 	task_plan_started = 1;
-	fprintf( f, "Dir=%s\nWinDir=%s\n", dest, windir );
+	fprintf( f, "Dir=%s\nWinDir=%s\n", jdir, windir );   /* the journals */
 	if ( *windir ) {
 		for ( pos = 0; ( pos = ini_next( "Win.ini", "Set", pos, &v ) ) >= 0; ) {
 			if ( !( t = cond_new( "Win.ini", "Set", v ) ) )
@@ -309,7 +309,7 @@ static void task_plan_line( char kind, const char *text )
 	if ( !f )
 		fail( T( "TaskPlanError" ) );
 	if ( !task_plan_started )
-		fprintf( f, "GDI-TASK-PLAN 1\nDir=%s\nWinDir=%s\n", dest, windir );
+		fprintf( f, "GDI-TASK-PLAN 1\nDir=%s\nWinDir=%s\n", jdir, windir );
 	task_plan_started = 1;
 	sprintf( line, "%.159s", text );
 	gdi_pm_oem_to_ansi( line );
@@ -327,10 +327,10 @@ void runner_path( char *p )
 	unsigned hash = 0;
 	const char *c;
 	char name[16];
-	for ( c = dest; *c; c++ )
+	for ( c = jdir; *c; c++ )
 		hash = hash * 31 + (unsigned char)toupper( (unsigned char)*c );
 	sprintf( name, "GDIP%04X.EXE", hash );
-	path_cat( p, dest, name );
+	path_cat( p, jdir, name );
 }
 
 /* plain DOS with registry entries: the runner (this installer) applies
@@ -366,7 +366,7 @@ static void add_runner( void )
 		return;
 	strcpy( added_for, dest );
 	post_runner( 1 );
-	path_cat( p, dest, "INSTALL.LOG" );   /* INSTALL /U removes it */
+	path_cat( p, jdir, "INSTALL.LOG" );   /* INSTALL /U removes it */
 	if ( ( f = fopen( p, "a" ) ) != NULL ) {
 		runner_path( p );
 		fprintf( f, "%s\n", p );
@@ -400,7 +400,7 @@ void run_windows( void )
 			continue;
 		}
 		if ( !f ) {
-			path_cat( p, dest, "RUNONCE.PLN" );
+			path_cat( p, jdir, "RUNONCE.PLN" );
 			if ( !( f = fopen( p, "w" ) ) )
 				fail( T( "WriteError" ) );
 		}
@@ -418,19 +418,19 @@ int uninstall_registry( void )
 {
 	char p[80];
 	FILE *f;
-	path_cat( p, dest, "RUNONCE.PLN" );
+	path_cat( p, jdir, "RUNONCE.PLN" );
 	remove( p );   /* [Run] Windows= never started */
 	if ( frontend() )
 		return 0;
-	path_cat( p, dest, "REGISTRY.PLN" );
+	path_cat( p, jdir, "REGISTRY.PLN" );
 	remove( p );   /* never applied */
-	path_cat( p, dest, "REGISTRY.LOG" );
+	path_cat( p, jdir, "REGISTRY.LOG" );
 	if ( !file_exists( p ) ) {
 		if ( *windir )
 			post_runner( 0 );
 		return 0;
 	}
-	path_cat( p, dest, "UNINST.PND" );
+	path_cat( p, jdir, "UNINST.PND" );
 	if ( !( f = fopen( p, "w" ) ) || fclose( f ) )
 		fail( T( "WriteError" ) );
 	post_runner( 1 );

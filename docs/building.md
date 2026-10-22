@@ -15,7 +15,7 @@ the texts of `src/language.ini` into `build/language.h`):
     make docs       -> build/gdi-manual.pdf (pandoc and LuaLaTeX)
 
 The build compiles the pinned UPX fork locally, packs `INSTALL.STB` as
-`INSTALL.PST`, links that DOS program as the stub of `INSTALL.UNP`, then
+`INSTALL.PST` (LZMA: the stub of an NE file must stay below 64 KB), links that DOS program as the stub of `INSTALL.UNP`, then
 packs the Win16 NE portion into the final `INSTALL.EXE`. Intermediate files
 remain in `build/` for diagnosis; distribute only `INSTALL.EXE`.
 

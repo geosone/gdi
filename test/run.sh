@@ -18,6 +18,12 @@
 #   PKG=test/depends ONEEXE=1 MANAGE=1 TARGET=PKGA TIMEOUT=15 KEYS=... test/run.sh
 #                       then INSTALL /M removes both packages
 #   CHECK=1 test/run.sh   INSTALL /CHECK of test/TEST.INI
+#   PKG=test/extras ONEEXE=1 EXTRAS=1 TARGET=MAIN TIMEOUT=15 KEYS=... test/run.sh
+#                       [Extras]: A installed from its directory, B skipped
+#                       (EXTRAS=none: A unticked in the list, B skipped)
+#   PKG=test/setupdir ONEEXE=1 SETUPDIR=1 TARGET=SHARED TIMEOUT=15 KEYS=... test/run.sh
+#                       two packages in A:\SHARED, each with its own setup
+#                       directory: A removed with /U, then B with /M
 # Environment: BOOTIMG (DOS boot floppy), INI, KEYS, TIMEOUT
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -66,6 +72,15 @@ fi
     else
         echo "A:\\SRC\\INSTALL.EXE $ARGS"
     fi
+    if [ -n "${SETUPDIR:-}" ]; then   # A with /U, then B with /M
+        echo 'ECHO === INSTALLED > AUX'; echo 'DIR /S /B A:\SHARED > AUX'; echo 'TYPE A:\GDI.INI > AUX'
+        echo 'TYPE A:\CONFIG.SYS > AUX'; echo 'TYPE A:\AUTOEXEC.BAT > AUX'
+        echo 'A:\SRC\INSTALL.EXE /U A:\SHARED\SDA\INSTALL.INI'
+        echo 'ECHO === AFTER A > AUX'; echo 'DIR /S /B A:\SHARED > AUX'; echo 'TYPE A:\SHARED\COMMON.SYS > AUX'; echo 'TYPE A:\CONFIG.SYS > AUX'
+        echo 'TYPE A:\AUTOEXEC.BAT > AUX'
+        echo 'A:\SRC\INSTALL.EXE /M'
+        echo 'ECHO === AFTER B > AUX'; echo 'DIR A:\SHARED > AUX'; echo 'TYPE A:\GDI.INI > AUX'
+    fi
     [ -n "${MANAGE:-}" ] && echo 'A:\SRC\INSTALL.EXE /M'
     [ -n "${MANAGE:-}" ] && { echo 'ECHO === GDI.INI > AUX'; echo 'TYPE A:\GDI.INI > AUX'; }
     [ -n "${UNINST:-}" ] && echo "A:\\$TARGET\\INSTALL.EXE /U"
@@ -81,7 +96,10 @@ fi
     echo 'ECHO === BACKUPS > AUX'; echo 'DIR A:\*.G0? > AUX'
     echo 'A:\SRC\QEXIT'
 } | crlf > "$OUT/src/RUN.BAT"
-{ echo '@ECHO OFF'; echo 'A:\SRC\RUN.BAT'; } | crlf > "$OUT/AUTOEXEC.BAT"
+{ echo '@ECHO OFF'
+  # SetupDir: PathAppend= and PathRemove= change this line
+  [ -n "${SETUPDIR:-}" ] && echo 'PATH A:\DOS;A:\OLDA;A:\TOOLS'
+  echo 'A:\SRC\RUN.BAT'; } | crlf > "$OUT/AUTOEXEC.BAT"
 P="$OUT/boot.img"
 mmd -i "$P" ::/SRC 2>/dev/null
 mcopy -s -o -i "$P" "$OUT"/src/* ::/SRC/ && mcopy -o -i "$P" "$OUT/CONFIG.SYS" "$OUT/AUTOEXEC.BAT" ::/ || exit 1
@@ -138,6 +156,60 @@ if [ -n "${MANAGE:-}" ]; then
     tr -d '\r' < "$OUT/serial.log" | sed -n '/=== GDI.INI/,/=== CONFIG.SYS/p' | grep -v '^===' | grep -q '=' && { echo "GDI.INI not empty"; exit 1; }
     for d in PKGA PKGB; do mdir -i "$P" ::/$d >/dev/null 2>&1 && { echo "$d left"; exit 1; }; done
     echo "DOS INSTALL /M integration passed"
+fi
+if [ -n "${EXTRAS:-}" ]; then
+    grep -aq '=== TARGET' "$OUT/serial.log" || { echo "setup did not end"; exit 1; }
+    mcopy -o -i "$P" ::/GDI.INI "$OUT/GDI.INI" 2>/dev/null || : > "$OUT/GDI.INI"
+    if [ "$EXTRAS" = none ]; then   # A unticked, B skipped
+        [ -s "$OUT/GDI.INI" ] && { echo "extras installed"; exit 1; }
+    else
+        tr -d '\r' < "$OUT/GDI.INI" | grep -q '^SDA=A:\\SHARED\\SDA|' || { echo "A not installed"; exit 1; }
+    fi
+    tr -d '\r' < "$OUT/GDI.INI" | grep -q '^SD[BC]=' && { echo "B or C installed"; exit 1; }
+    mdir -i "$P" ::/MAIN/MAIN.TXT >/dev/null 2>&1 || { echo "main package missing"; exit 1; }
+    mdir -i "$P" ::/SHARED/DRVB.SYS >/dev/null 2>&1 && { echo "B installed"; exit 1; }
+    # PathAppend= of A without a PATH line: a line of its own, the PATH of
+    # the system stays
+    mcopy -o -i "$P" ::/AUTOEXEC.BAT "$OUT/AUTOEXEC.NEW" || exit 1
+    if [ "$EXTRAS" = none ]; then
+        grep -qi '^PATH' "$OUT/AUTOEXEC.NEW" && { echo "PATH added"; exit 1; }
+    else
+        tr -d '\r' < "$OUT/AUTOEXEC.NEW" | grep -qx 'PATH %PATH%;A:\\SHARED' || { echo "PATH line missing"; cat "$OUT/AUTOEXEC.NEW"; exit 1; }
+    fi
+    echo "DOS [Extras] integration passed"
+fi
+if [ -n "${SETUPDIR:-}" ]; then
+    tr -d '\r' < "$OUT/serial.log" > "$OUT/setupdir.txt"
+    python3 - "$OUT/setupdir.txt" <<'PYEOF' || exit 1
+import sys
+t = open(sys.argv[1], errors="replace").read()
+inst, rest = t.split("=== AFTER A")[0].split("=== INSTALLED")[1], t.split("=== AFTER A")[1]
+a, b = rest.split("=== AFTER B")
+b = b.split("=== CONFIG.SYS")[0]
+up = inst.upper()
+for f in ("A:\\SHARED\\DRVA.SYS", "A:\\SHARED\\DRVB.SYS", "A:\\SHARED\\COMMON.SYS",
+          "A:\\SHARED\\SDA\\INSTALL.INI", "A:\\SHARED\\SDA\\INSTALL.LOG",
+          "A:\\SHARED\\SDB\\INSTALL.INI", "SDA=A:\\SHARED\\SDA|", "SDB=A:\\SHARED\\SDB|"):
+    assert f in up, ("installed", f)
+ua = a.upper()
+assert "DRVA.SYS" not in ua and "\\SDA" not in ua, ("A left", a)
+assert "A:\\SHARED\\DRVB.SYS" in ua and "COMMON FROM B" in ua and "\\SDB\\INSTALL.INI" in ua, ("B gone", a)
+assert "DEVICE=A:\\SHARED\\DRVB.SYS" in ua and "DRVA.SYS" not in ua, a
+assert "SDB=" not in b.upper() and "SDA=" not in b.upper(), ("GDI.INI", b)
+# [Find] of B: DRVA.SYS of A in the shared directory
+assert "REM FOUND A:\\SHARED\\DRVA.SYS" in up, ("find in %DIR%", inst)
+# PathAppend=: once, while one of the packages is there; PathRemove=: only
+# its part of the line
+import re
+def paths(s):
+    return re.findall(r"^PATH (.*)$", s, re.M | re.I)
+assert paths(inst) == ["A:\\DOS;A:\\TOOLS;A:\\SHARED"], ("PATH installed", paths(inst))
+assert paths(a) == ["A:\\DOS;A:\\TOOLS;A:\\SHARED"], ("PATH after A", paths(a))
+final = t.split("=== AUTOEXEC.BAT")[-1].split("=== TARGET")[0]
+assert paths(final) == ["A:\\DOS;A:\\TOOLS"], ("PATH after B", paths(final))
+PYEOF
+    mdir -i "$P" ::/SHARED >/dev/null 2>&1 && { echo "A:\SHARED left"; exit 1; }
+    echo "DOS SetupDir integration passed"
 fi
 if [ -n "${SILENT:-}" ]; then
     mcopy -o -i "$P" ::/SILENT/TESTDRV.SYS "$OUT/SILENT.SYS" || exit 1

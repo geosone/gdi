@@ -288,7 +288,7 @@ int registry_write_plan( char *message )
 		}
 		if ( !active || ( in_extra && !in_batch ) || !*windir )
 			return 0;
-		path_cat( registry_plan_file, dest, "REGISTRY.PLN" );
+		path_cat( registry_plan_file, jdir, "REGISTRY.PLN" );
 		registry_family = 3;
 		registry_deferred = 1;
 		pos = 0;
@@ -305,7 +305,7 @@ int registry_write_plan( char *message )
 		sprintf( message, "Cannot create registry plan: %.60s", registry_plan_file );
 		return -1;
 	}
-	path_cat( journal, dest, "REGISTRY.LOG" );
+	path_cat( journal, jdir, "REGISTRY.LOG" );
 	fprintf( file, "GDI-REGISTRY-PLAN 1\nJournal=%s\n", journal );
 	while ( ( pos = registry_next( pos, &line ) ) >= 0 ) {
 		struct gdi_reg_entry entry;
@@ -412,6 +412,29 @@ int mkdirs( const char *path )
 
 /* the first parent of the target directory that setup creates (DIRS.LOG) */
 char dest_top[80];
+char jdir[80];   /* INSTALL.INI/EXE and the journals: %DIR% or [Setup] SetupDir= */
+
+/* the setup directory of dest: %DIR%\SetupDir, or %DIR% itself */
+void setup_dir( void )
+{
+	const char *s = ini_get( "Setup", "SetupDir", NULL );
+	if ( s && *s && strlen( dest ) + strlen( s ) < sizeof(jdir) - 1 )
+		path_cat( jdir, dest, s );
+	else
+		strcpy( jdir, dest );
+}
+
+/* dir holds the INSTALL.INI of an installation: jdir = dir, dest = %DIR% */
+void dirs_from_setup_dir( const char *dir )
+{
+	const char *s = ini_get( "Setup", "SetupDir", NULL );
+	char *b;
+	sprintf( jdir, "%.79s", dir );
+	strcpy( dest, jdir );
+	if ( s && *s && ( b = strrchr( dest, '\\' ) ) != NULL && b - dest > 2 &&
+		!stricmp( b + 1, s ) )
+		*b = 0;
+}
 
 int copy_file( const char *from, const char *to )
 {

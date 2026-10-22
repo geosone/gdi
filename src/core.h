@@ -62,6 +62,9 @@ extern char selected_language[9];
 #define T gdi_text
 
 extern char dest_top[80];
+extern char jdir[80];   /* INSTALL.INI/EXE and the journals ([Setup] SetupDir=) */
+void setup_dir( void );
+void dirs_from_setup_dir( const char *dir );
 extern char *ed[MAXLINE];
 extern int ned;
 
@@ -146,6 +149,7 @@ void remove_all( void );
 void ask_language( void );
 void install_steps( void );
 void use_ini( const char *dir );
+void ask_extras( void );
 void extras( void );
 int core_run( void );
 

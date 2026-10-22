@@ -119,6 +119,7 @@ void install_steps( void )
 			batch_choices();
 		else {
 			ask_options();
+			ask_extras();
 			ui_clear();
 			ask_language();
 		}
@@ -169,15 +170,155 @@ void use_ini( const char *dir )
 	ui_clear();
 }
 
-/* further installations: the INSTALL.INI of another disk or directory is
- * installed by this program for the new system (%BOOT%), then the DOS
- * setup continues */
+/* [Extras] Extra=on|ID|text[|dir]: further software named in advance;
+ * chosen with the options, installed after the main setup */
+#define MAXEXTRA 12
+static char *extra_id[MAXEXTRA], *extra_label[MAXEXTRA], *extra_dir[MAXEXTRA];
+static char extra_on[MAXEXTRA];
+static int nextra;
+
+static void read_extras( void )
+{
+	const char *v, *t, *b;
+	char part[80];
+	int pos = 0, k;
+	if ( nextra )
+		return;
+	while ( nextra < MAXEXTRA && ( pos = ini_next( "Extras", "Extra", pos, &v ) ) >= 0 ) {
+		if ( !strnicmp( v, "on|", 3 ) )
+			extra_on[nextra] = 1, t = v + 3;
+		else if ( !strnicmp( v, "off|", 4 ) )
+			extra_on[nextra] = 0, t = v + 4;
+		else
+			extra_on[nextra] = 1, t = v;
+		/* ID|text[|dir] */
+		extra_label[nextra] = extra_dir[nextra] = NULL;
+		for ( k = 0; k < 3; k++ ) {
+			b = strchr( t, '|' );
+			sprintf( part, "%.*s", b ? (int)( b - t > 79 ? 79 : b - t ) : 79, t );
+			if ( k == 0 )
+				extra_id[nextra] = str_dup( *part ? part : "?" );
+			else if ( k == 1 && *part )
+				extra_label[nextra] = str_dup( part );
+			else if ( k == 2 && *part ) {
+				expand( part, part, sizeof(part) );
+				extra_dir[nextra] = str_dup( part );
+			}
+			if ( !b )
+				break;
+			t = b + 1;
+		}
+		if ( !extra_label[nextra] )
+			extra_label[nextra] = str_dup( extra_id[nextra] );
+		nextra++;
+	}
+}
+
+/* the list of [Extras], with the options of the main setup */
+void ask_extras( void )
+{
+	read_extras();
+	if ( !nextra || in_batch || in_extra )
+		return;
+	ui_clear();
+	if ( ui_checklist( T( "ExtrasTitle" ), T( "ExtrasList" ),
+		(const char **)extra_label, extra_on, nextra ) )
+		abort_setup();
+	ui_clear();
+}
+
+/* the disk of an [Extras] package is wrong or missing: 0 try again, 1 skip */
+static int extra_retry( const char *msg )
+{
+	static const char *b[2];
+	b[0] = T( "Retry" );
+	b[1] = T( "Skip" );
+	ui_clear();
+	return ui_message( T( "ExtrasTitle" ), msg, b, 2, 0, 1 ) != 0;
+}
+
+/* install the INSTALL.INI of dir for the new system; want: the Id it must
+ * have (NULL: any); returns 0, 1 when dir holds another package, 2 when
+ * that is skipped */
+static int extra_install( const char *dir, const char *want, const char *label )
+{
+	static char ini[80], maindir[80], maindest[80];
+	char id[64];
+	strcpy( maindir, srcdir );
+	strcpy( maindest, dest );
+	path_cat( ini, dir, "INSTALL.INI" );
+	ini_save();
+	if ( ini_load( ini ) ) {
+		ini_restore();
+		return 2;
+	}
+	ini_package_id( id, sizeof(id) );
+	if ( want && stricmp( id, want ) ) {
+		char msg[200];
+		sprintf( msg, T( "ExtraWrong" ), ini_get( "Setup", "Product", id ), label );
+		ini_restore();
+		return extra_retry( msg ) ? 2 : 1;
+	}
+	use_ini( dir );
+	in_extra = 1;
+	if ( !setjmp( extra_abort ) ) {
+		install_steps();
+		ui_clear();
+		{
+			static const char *ok[1];
+			ok[0] = T( "OK" );
+			ui_message( T( "DoneTitle" ),
+				ini_get( "Setup", "Done", T( "DoneText" ) ), ok, 1, 0, 0 );
+		}
+	}
+	in_extra = 0;
+	/* back to the main setup */
+	ini_restore();
+	use_ini( maindir );
+	strcpy( dest, maindest );
+	return 0;
+}
+
+/* further installations: the packages chosen from [Extras], then, with
+ * Extras=yes, any INSTALL.INI of another disk or directory; each is
+ * installed by this program for the new system (%BOOT%), then the setup
+ * continues */
 void extras( void )
 {
 	static const char *b[2];
-	static char dir[80], ini[80], maindir[80], maindest[80];
-	strcpy( maindir, srcdir );
-	strcpy( maindest, dest );
+	static char dir[80], ini[80], text[200];
+	int i;
+	read_extras();
+	for ( i = 0; i < nextra; i++ ) {
+		if ( !extra_on[i] )
+			continue;
+		/* a directory of its own (the setup CD): no question if it is
+		 * there; else (started from disks) its disk */
+		if ( extra_dir[i] ) {
+			path_cat( ini, extra_dir[i], "INSTALL.INI" );
+			if ( file_exists( ini ) && extra_install( extra_dir[i], extra_id[i], extra_label[i] ) == 0 )
+				continue;
+		}
+		strcpy( dir, ini_get( "Setup", "ExtrasDir", "A:\\" ) );
+		for ( ;; ) {
+			sprintf( text, T( "ExtraDisk" ), extra_label[i] );
+			ui_clear();
+			if ( ui_input( T( "ExtrasTitle" ), text, dir, 64 ) )
+				break;   /* skipped */
+			path_cat( ini, dir, "INSTALL.INI" );
+			if ( !file_exists( ini ) ) {
+				char msg[120];
+				sprintf( msg, "%s %s", T( "MissingFile" ), ini );
+				if ( extra_retry( msg ) )
+					break;
+				continue;
+			}
+			if ( extra_install( dir, extra_id[i], extra_label[i] ) != 1 )
+				break;
+		}
+	}
+	if ( stricmp( ini_get( "Setup", "Extras", "no" ), "yes" ) )
+		return;
 	strcpy( dir, ini_get( "Setup", "ExtrasDir", "A:\\" ) );
 	for ( ;; ) {
 		b[0] = T( "InstallMore" );
@@ -198,28 +339,7 @@ void extras( void )
 			ui_message( T( "ErrorTitle" ), msg, ok, 1, 0, 1 );
 			continue;
 		}
-		ini_save();
-		if ( ini_load( ini ) ) {
-			ini_restore();
-			continue;
-		}
-		use_ini( dir );
-		in_extra = 1;
-		if ( !setjmp( extra_abort ) ) {
-			install_steps();
-			ui_clear();
-			{
-				static const char *ok[1];
-				ok[0] = T( "OK" );
-				ui_message( T( "DoneTitle" ),
-					ini_get( "Setup", "Done", T( "DoneText" ) ), ok, 1, 0, 0 );
-			}
-		}
-		in_extra = 0;
-		/* back to the DOS setup */
-		ini_restore();
-		use_ini( maindir );
-		strcpy( dest, maindest );
+		extra_install( dir, NULL, NULL );
 	}
 }
 
@@ -259,6 +379,7 @@ void answers_load( void )
 int core_run( void )
 {
 	union REGS r;
+	const char *extras_line;
 
 	if ( answer_file[0] )
 		answers_load();
@@ -301,6 +422,7 @@ int core_run( void )
 			ask_dirs();
 			ui_clear();
 			ask_options();
+			ask_extras();
 			ui_clear();
 			if ( !confirm() )
 				abort_setup();
@@ -316,7 +438,8 @@ int core_run( void )
 			run_installers();
 		} else
 			install_steps();
-		if ( !stricmp( ini_get( "Setup", "Extras", "no" ), "yes" ) )
+		if ( !stricmp( ini_get( "Setup", "Extras", "no" ), "yes" ) ||
+			ini_next( "Extras", "Extra", 0, &extras_line ) >= 0 )
 			extras();
 	}
 	ui_clear();

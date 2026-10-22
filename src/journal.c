@@ -146,10 +146,19 @@ void gdi_remove_dirs( const char *dir )
 		if ( fgets( top, sizeof(top), f ) )
 			strip_eol( top );
 		fclose( f );
-		remove( p );
+	}
+	/* still in use (journals for the Windows part): DIRS.LOG stays for
+	 * the removal of dir later */
+	remove( p );
+	if ( rmdir( dir ) ) {
+		if ( *top && ( f = fopen( p, "w" ) ) != NULL ) {
+			fprintf( f, "%s\n", top );
+			fclose( f );
+		}
+		return;
 	}
 	strcpy( p, dir );
-	while ( !rmdir( p ) && *top && stricmp( p, top ) &&
+	while ( ( !stricmp( p, dir ) || !rmdir( p ) ) && *top && stricmp( p, top ) &&
 		( b = strrchr( p, '\\' ) ) != NULL && b - p > 2 &&
 		!strnicmp( p, top, strlen( top ) ) )
 		*b = 0;

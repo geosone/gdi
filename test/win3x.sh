@@ -10,7 +10,8 @@
 # package entries ([Registry] Set= and Import=) and be as before after /U.
 # FRONTEND=1 installs and removes from Windows (ENGINE=1: through the DOS
 # engine; SILENT=1: INSTALL /S; MANAGE=1: removed by INSTALL /M), UPDATE=1
-# updates.
+# updates.  SETUPDIR=1: [Setup] SetupDir=GDI, the installer and the
+# journals in C:\PMTEST\GDI (with any of the others).
 # Environment: WIN311IMG (a hard disk image with Windows 3.1x in C:\WINDOWS,
 # FAT partition at sector 63, AUTOEXEC.BAT is replaced), TIMEOUT
 set -uo pipefail
@@ -31,6 +32,14 @@ if [ -n "${COUNTRY:-}" ]; then
     sed -i '/^Texts=English/d' "$OUT/src/INSTALL.INI"
     R=e
 fi
+# SETUPDIR=1: the installer and its journals in C:\PMTEST\GDI
+SD=PMTEST
+if [ -n "${SETUPDIR:-}" ]; then
+    sed -i 's/^DefaultDir=%BOOT%\\PMTEST\r$/&\nSetupDir=GDI\r/' "$OUT/src/INSTALL.INI"
+    grep -q '^SetupDir=GDI' "$OUT/src/INSTALL.INI" || { echo "SetupDir= not set"; exit 1; }
+    SD=PMTEST/GDI
+fi
+U="C:\\${SD//\//\\}\\INSTALL.EXE /U"
 # ENGINE=1: [Detect] needs the DOS engine, the frontend starts it
 [ -n "${ENGINE:-}" ] && printf '\r\n[Detect]\r\nGDITRUE=TESTTOOL.COM\r\n' >> "$OUT/src/INSTALL.INI"
 printf '\xcd\x20' > "$OUT/src/TESTTOOL.COM"
@@ -95,7 +104,7 @@ if [ -n "${UPDATE:-}" ]; then
     fi
     fetch 2-updated
     mcopy -o -i "$P" ::/GDI.INI "$OUT/files/2-updated/" 2>/dev/null
-    run 'C:\PMTEST\INSTALL.EXE /U' uninst "$R ret ret ret"
+    run "$U" uninst "$R ret ret ret"
     fetch 3-removed
     mcopy -o -i "$P" ::/GDI.INI "$OUT/files/3-removed/" 2>/dev/null
 elif [ -n "${FRONTEND:-}" ]; then
@@ -111,7 +120,7 @@ elif [ -n "${FRONTEND:-}" ]; then
     else
         KEYS_IN="ret ret ret ret ret ret" KEYS_UN="$R ret"
     fi
-    A_IN='' A_UN='C:\PMTEST\INSTALL.EXE /U'
+    A_IN='' A_UN=$U
     [ -n "${SILENT:-}" ] && A_IN=' /S' KEYS_IN=''
     [ -n "${MANAGE:-}" ] && A_UN='C:\SRC\INSTALL.EXE /M' KEYS_UN="spc ret $R ret"
     TIMEOUT=${TIMEOUT:-80} run "$W C:\SRC\INSTALL.EXE$A_IN" install "$KEYS_IN"
@@ -124,7 +133,7 @@ else
     fetch 1-installed
     run '@ECHO OFF|PATH C:\;C:\WINDOWS|C:\WINDOWS\WIN C:\EXITWIN.EXE 30' windows ""
     fetch 2-windows
-    run 'C:\PMTEST\INSTALL.EXE /U' uninst "$R ret ret ret"
+    run "$U" uninst "$R ret ret ret"
     fetch 3-removed
     run '@ECHO OFF|PATH C:\;C:\WINDOWS|C:\WINDOWS\WIN C:\EXITWIN.EXE 30' windows2 ""
     fetch 4-windows
@@ -136,8 +145,8 @@ if [ -z "${UPDATE:-}" ]; then
     cd "$OUT/files"
     # [Run] Windows=: from DOS RUNONCE.PLN, started by the runner
     if [ "$INSTALLED" = 2-windows ]; then
-        [ -f 1-installed/PMTEST/RUNONCE.PLN ] || { echo "RUNONCE.PLN missing"; exit 1; }
-        [ ! -f 2-windows/PMTEST/RUNONCE.PLN ] || { echo "RUNONCE.PLN not started"; exit 1; }
+        [ -f 1-installed/$SD/RUNONCE.PLN ] || { echo "RUNONCE.PLN missing"; exit 1; }
+        [ ! -f 2-windows/$SD/RUNONCE.PLN ] || { echo "RUNONCE.PLN not started"; exit 1; }
     fi
     "$ROOT/test/regdat.py" "$INSTALLED/REG.DAT" > installed.reg
     for k in '.gdt = GdiTestFile' 'GdiTestFile = GDI Testdatei' 'GdiTestFile\shell\open\command = notepad.exe %1'; do
@@ -153,5 +162,9 @@ if [ -z "${UPDATE:-}" ]; then
     # [Ini] Set=: CONTROL.INI
     grep -qx 'Value=installed' <(tr -d '\r' < "$INSTALLED/CONTROL.INI") || { echo "CONTROL.INI value missing"; exit 1; }
     diff -B <(tr -d '\r' < 0-before/CONTROL.INI) <(tr -d '\r' < "$REMOVED/CONTROL.INI") || { echo "CONTROL.INI not restored"; exit 1; }
+    # the setup directory: INSTALL.INI there, the files in C:\PMTEST; all
+    # gone after the removal
+    [ -f "1-installed/$SD/INSTALL.INI" ] && [ -f 1-installed/PMTEST/TESTTOOL.COM ] || { echo "setup directory wrong"; exit 1; }
+    [ ! -e "$REMOVED/PMTEST" ] || { echo "C:\PMTEST left"; ls -R "$REMOVED/PMTEST"; exit 1; }
     echo "Windows registry, WIN.INI and CONTROL.INI integration passed"
 fi

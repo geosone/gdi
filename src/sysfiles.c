@@ -177,6 +177,142 @@ static void strip( char *s, const char *pat )
 		}
 }
 
+/* PathAppend=cond|dir: dir in the PATH of AUTOEXEC.BAT, for the programs
+ * of the package (USBSYNC, ASPITEST) from any directory; PathRemove=dir
+ * takes dir out of it (a directory of an older version).  The value of a
+ * line that sets the PATH ("PATH x", "PATH=x", "SET PATH=x"), or NULL */
+static char *path_value( char *l )
+{
+	while ( *l == ' ' || *l == '\t' || *l == '@' )
+		l++;
+	if ( !strnicmp( l, "SET", 3 ) && ( l[3] == ' ' || l[3] == '\t' ) )
+		for ( l += 3; *l == ' ' || *l == '\t'; l++ )
+			;
+	if ( strnicmp( l, "PATH", 4 ) || ( l[4] != ' ' && l[4] != '\t' && l[4] != '=' ) )
+		return NULL;
+	for ( l += 4; *l == ' ' || *l == '\t' || *l == '='; l++ )
+		;
+	return *l ? l : NULL;
+}
+
+/* the part of the PATH value v equal to dir (also with a "\" at the end),
+ * or NULL; *len: its length */
+static char *path_part( char *v, const char *dir, int *len )
+{
+	int n = strlen( dir );
+	while ( n > 3 && dir[n - 1] == '\\' )
+		n--;
+	while ( *v ) {
+		int l = 0;
+		while ( v[l] && v[l] != ';' )
+			l++;
+		if ( ( l == n || ( l == n + 1 && v[n] == '\\' ) ) && !strnicmp( v, dir, n ) ) {
+			*len = l;
+			return v;
+		}
+		v += l;
+		if ( *v )
+			v++;
+	}
+	return NULL;
+}
+
+static void ed_add_path( void )
+{
+	const char *v, *t;
+	char dir[80], line[256], *val;
+	int pos = 0, i, last, n;
+	while ( ( pos = ini_next( "Autoexec.bat", "PathAppend", pos, &v ) ) >= 0 ) {
+		if ( !( t = cond_new( "Autoexec.bat", "PathAppend", v ) ) )
+			continue;
+		expand( dir, t, sizeof(dir) );
+		/* the last line that sets the PATH counts */
+		for ( last = -1, i = 0; i < ned; i++ )
+			if ( !is_rem( ed[i] ) && path_value( ed[i] ) )
+				last = i;
+		if ( last < 0 ) {   /* none: the PATH of the system (Windows 9x) stays */
+			sprintf( line, "PATH %%PATH%%;%s", dir );
+			for ( i = 0; i < ned && !strnicmp( ed[i], "@ECHO", 5 ); i++ )
+				;
+			ed_insert( i, line );
+			continue;
+		}
+		val = path_value( ed[last] );
+		if ( path_part( val, dir, &n ) || strlen( ed[last] ) + strlen( dir ) + 2 > sizeof(line) )
+			continue;
+		sprintf( line, "%s%s%s", ed[last], val[strlen( val ) - 1] == ';' ? "" : ";", dir );
+		free( ed[last] );
+		ed[last] = str_dup( line );
+	}
+}
+
+/* another package has its setup directory in dir (SetupDir=: packages
+ * sharing a directory) and still needs dir in the PATH */
+static int path_shared( const char *dir )
+{
+	struct find_t found;
+	char p[80], q[80];
+	path_cat( p, dir, "*.*" );
+	if ( _dos_findfirst( p, _A_SUBDIR, &found ) )
+		return 0;
+	do {
+		if ( !( found.attrib & _A_SUBDIR ) || found.name[0] == '.' )
+			continue;
+		path_cat( p, dir, found.name );
+		path_cat( q, p, "INSTALL.INI" );
+		if ( stricmp( p, jdir ) && file_exists( q ) )
+			return 1;
+	} while ( !_dos_findnext( &found ) );
+	return 0;
+}
+
+/* dir out of every line that sets the PATH, the rest of the line stays; a
+ * line left with nothing but %PATH% (added by PathAppend) goes */
+static void path_drop( const char *dir )
+{
+	char *val, *part;
+	int i, n;
+	for ( i = 0; i < ned; i++ ) {
+		if ( is_rem( ed[i] ) || !( val = path_value( ed[i] ) ) ||
+			!( part = path_part( val, dir, &n ) ) )
+			continue;
+		/* with the ";" before it, or after it when it is the first */
+		if ( part > val )
+			memmove( part - 1, part + n, strlen( part + n ) + 1 );
+		else
+			memmove( part, part + n + ( part[n] == ';' ), strlen( part + n ) + 1 );
+		if ( !stricmp( val, "%PATH%" ) )
+			ed_delete( i-- );
+		else if ( !*val )
+			strcpy( val, ";" );   /* "PATH dir": an empty PATH, as without dir */
+	}
+}
+
+/* PathRemove= (installation and INSTALL /U, like Remove=); INSTALL /U: the
+ * directories of PathAppend= out again */
+static void ed_unpath( void )
+{
+	const char *v, *t;
+	char dir[80], list[256], *d;
+	int pos = 0;
+	while ( ( pos = ini_next( "Autoexec.bat", "PathRemove", pos, &v ) ) >= 0 ) {
+		expand( list, v, sizeof(list) );   /* dir;dir;... */
+		for ( d = strtok( list, ";" ); d; d = strtok( NULL, ";" ) ) {
+			sprintf( dir, "%.79s", d );
+			path_drop( dir );
+		}
+	}
+	if ( !uninstall )
+		return;
+	for ( pos = 0; ( pos = ini_next( "Autoexec.bat", "PathAppend", pos, &v ) ) >= 0; ) {
+		if ( !( t = cond( v ) ) )
+			continue;
+		expand( dir, t, sizeof(dir) );
+		if ( !path_shared( dir ) )
+			path_drop( dir );
+	}
+}
+
 /* INSTALL /U: take the text out again; a line added by Extend goes */
 static void ed_unextend( const char *section )
 {
@@ -357,6 +493,8 @@ static void ed_add_dos( const char *section, int isconfig )
 		if ( !found && *n )
 			ed_insert( at++, n );
 	}
+	if ( !isconfig )
+		ed_add_path();
 }
 
 /* the line of section (header "[name]") equal to text, or -1 */
@@ -381,7 +519,7 @@ static void ed_add_ini( void )
 	char sec[40], line[256], hdr[44], journal[80];
 	int pos = 0, i;
 	FILE *f = NULL;
-	path_cat( journal, dest, "SYSTEM.ADD" );
+	path_cat( journal, jdir, "SYSTEM.ADD" );
 	while ( ( pos = ini_next( "System.ini", "Add", pos, &v ) ) >= 0 ) {
 		const char *bar;
 		if ( !( t = cond_new( "System.ini", "Add", v ) ) || !( bar = strchr( t, '|' ) ) )
@@ -419,7 +557,7 @@ static int ed_unadd_ini( void )
 	char journal[80], l[300], hdr[44], *bar;
 	FILE *f;
 	int i;
-	path_cat( journal, dest, "SYSTEM.ADD" );
+	path_cat( journal, jdir, "SYSTEM.ADD" );
 	if ( !( f = fopen( journal, "r" ) ) )
 		return 0;
 	while ( fgets( l, sizeof(l), f ) ) {
@@ -458,7 +596,7 @@ static void ed_change_ini( void )
 	char sec[40], old[256], line[256], hdr[44], journal[80];
 	int pos = 0, i;
 	FILE *f = NULL;
-	path_cat( journal, dest, "SYSTEM.CHG" );
+	path_cat( journal, jdir, "SYSTEM.CHG" );
 	while ( ( pos = ini_next( "System.ini", "Change", pos, &v ) ) >= 0 ) {
 		if ( !( t = cond_new( "System.ini", "Change", v ) ) )
 			continue;
@@ -486,7 +624,7 @@ static int ed_unchange_ini( void )
 	char journal[80], l[560], sec[40], old[256], line[256], hdr[44];
 	FILE *f;
 	int i;
-	path_cat( journal, dest, "SYSTEM.CHG" );
+	path_cat( journal, jdir, "SYSTEM.CHG" );
 	if ( !( f = fopen( journal, "r" ) ) )
 		return 0;
 	while ( fgets( l, sizeof(l), f ) ) {
@@ -645,7 +783,7 @@ static int ed_set_ini( const char *ini_section )
 	FILE *file = NULL;
 	int pos = 0, index, end, present, reuse, record, appending = 0;
 	int ansi = !stricmp( ini_section, "Win.ini" );
-	path_cat( journal, dest, set_journal( ini_section ) );
+	path_cat( journal, jdir, set_journal( ini_section ) );
 	reuse = file_exists( journal );
 	while ( ( pos = ini_next( ini_section, "Set", pos, &value ) ) >= 0 ) {
 		text = cond_new( ini_section, "Set", value );
@@ -730,7 +868,7 @@ static int ed_restore_ini( char *journal, const char *ini_section )
 	FILE *file;
 	char header[40], section[40], key[80], flag[8], oldline[256], newline[256];
 	int index, end, present;
-	path_cat( journal, dest, set_journal( ini_section ) );
+	path_cat( journal, jdir, set_journal( ini_section ) );
 	if ( !( file = fopen( journal, "r" ) ) )
 		return 0;
 	if ( !fgets( header, sizeof(header), file ) )
@@ -775,7 +913,7 @@ static int has_active( const char *section, const char *key )
 	const char *v;
 	int pos = 0;
 	while ( ( pos = ini_next( section, key, pos, &v ) ) >= 0 )
-		if ( !strcmp( key, "Remove" ) ? !update_mode : cond_new( section, key, v ) != NULL )
+		if ( !strcmp( key, "Remove" ) || !strcmp( key, "PathRemove" ) ? !update_mode : cond_new( section, key, v ) != NULL )
 			return 1;
 	return 0;
 }
@@ -971,7 +1109,7 @@ static int patch_one( const char *path, const unsigned char *before,
 	int result = hexpatch_file_ex( path, before, after, length, expected,
 		saved, !uninstall );
 	if ( result == HEXPATCH_OK && !uninstall && *saved ) {
-		path_cat( p, dest, "INSTALL.LOG" );
+		path_cat( p, jdir, "INSTALL.LOG" );
 		if ( ( f = fopen( p, "a" ) ) != NULL ) {
 			fprintf( f, "%s\n", saved );
 			fclose( f );
@@ -1091,7 +1229,7 @@ static void ini_set_all( void )
 	const char *v, *t, *rest;
 	FILE *file = NULL;
 	int pos = 0, index, end, changed = 0;
-	path_cat( journal, dest, "INI.SET" );
+	path_cat( journal, jdir, "INI.SET" );
 	*loaded = 0;
 	while ( ( pos = ini_next( "Ini", "Set", pos, &v ) ) >= 0 ) {
 		if ( !( t = cond_new( "Ini", "Set", v ) ) )
@@ -1147,7 +1285,7 @@ static void ini_restore_all( void )
 	char (*l)[256];   /* 6 lines, on the heap: the data segment is full */
 	FILE *f;
 	int i, index, end, changed = 0;
-	path_cat( journal, dest, "INI.SET" );
+	path_cat( journal, jdir, "INI.SET" );
 	if ( !( f = fopen( journal, "r" ) ) )
 		return;
 	if ( !( l = malloc( 6 * sizeof(*l) ) ) )
@@ -1203,18 +1341,19 @@ void edit_file( const char *path, const char *section, int kind )
 	char set_journal_path[80];
 	int restored = 0, set_journal_exists = 0, unadded = 0, unchanged = 0;
 	if ( kind >= 2 && uninstall ) {
-		path_cat( set_journal_path, dest, set_journal( section ) );
+		path_cat( set_journal_path, jdir, set_journal( section ) );
 		set_journal_exists = file_exists( set_journal_path );
 		if ( kind == 2 ) {
 			char added[80];
-			path_cat( added, dest, "SYSTEM.ADD" );
+			path_cat( added, jdir, "SYSTEM.ADD" );
 			set_journal_exists |= file_exists( added );
-			path_cat( added, dest, "SYSTEM.CHG" );
+			path_cat( added, jdir, "SYSTEM.CHG" );
 			set_journal_exists |= file_exists( added );
 		}
 	}
 	if ( !has_active( section, "Add" ) && !has_active( section, "Remove" ) &&
-		!has_active( section, "Extend" ) &&
+		!has_active( section, "Extend" ) && !has_active( section, "PathAppend" ) &&
+		!has_active( section, "PathRemove" ) &&
 		!( kind == 2 && has_active( section, "Change" ) ) &&
 		!( kind >= 2 && ( has_active( section, "Set" ) ||
 			set_journal_exists ) ) )
@@ -1236,6 +1375,8 @@ void edit_file( const char *path, const char *section, int kind )
 		ed_remove( section );
 		if ( kind < 2 )
 			ed_unextend( section );
+		if ( kind == 1 )
+			ed_unpath();
 	}
 	if ( !uninstall ) {
 		if ( kind == 2 ) {
@@ -1255,11 +1396,11 @@ void edit_file( const char *path, const char *section, int kind )
 	if ( restored > 0 )
 		remove( set_journal_path );
 	if ( unadded ) {
-		path_cat( set_journal_path, dest, "SYSTEM.ADD" );
+		path_cat( set_journal_path, jdir, "SYSTEM.ADD" );
 		remove( set_journal_path );
 	}
 	if ( unchanged ) {
-		path_cat( set_journal_path, dest, "SYSTEM.CHG" );
+		path_cat( set_journal_path, jdir, "SYSTEM.CHG" );
 		remove( set_journal_path );
 	}
 	ed_free();

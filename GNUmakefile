@@ -55,9 +55,10 @@ upx:
 	  -DUPX_CONFIG_DISABLE_SELF_PACK_TEST=ON
 	cmake --build $(UPX_BUILD) --target upx
 
+# LZMA: the packed DOS part must stay below 64 KB (the stub of the NE file)
 $(DOSPACKED): $(DOSIMAGE) upx
 	cp $< $@
-	$(UPX) --best $@
+	$(UPX) --best --lzma $@
 
 $(OUT)/wininstall.obj: src/wininstall.c src/gdi.h src/wintasks.h | $(OUT)
 	$(CC) $(WCOPT) -fo=$@ $<

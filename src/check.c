@@ -64,27 +64,28 @@ static const char *sections[] = {
 	"Setup", "Welcome", "Options", "Find", "Detect", "Files", "Dirs", "Run",
 	"Config.sys", "Autoexec.bat", "System.ini", "Win.ini", "Ini", "ProgMan",
 	"HexPatch", "Registry", "Keep", "Newer", "Installer", "Disks", "Languages",
-	"Text", NULL
+	"Text", "Extras", NULL
 };
 static const char *setup_keys[] = {
 	"Title", "Product", "Version", "Id", "License", "Readme", "DefaultDir",
 	"Done", "Uninstall", "Requires", "Conflicts", "Texts", "Mode", "Drive",
 	"Archive", "Extras", "ExtrasDir", "Fdisk", "Format", "Windows", "Space",
-	"MinDos", "MinWindows", NULL
+	"MinDos", "MinWindows", "SetupDir", NULL
 };
 static const char *options_keys[] = { "Option", NULL };
 static const char *run_keys[] = { "Before", "After", "Windows", NULL };
-static const char *dos_keys[] = { "Remove", "Add", "Position", "Extend", "Replace", NULL };
+static const char *dos_keys[] = { "Remove", "Add", "Position", "Extend", "Replace", "PathAppend", "PathRemove", NULL };
 static const char *system_keys[] = { "Remove", "Add", "Set", "Change", "Replace", NULL };
 static const char *set_keys[] = { "Set", NULL };
 static const char *progman_keys[] = { "Item", NULL };
 static const char *hexpatch_keys[] = { "Patch", "PatchIfPresent", "PatchVariant", NULL };
 static const char *languages_keys[] = { "Choice", "Config", "Default", NULL };
+static const char *extras_keys[] = { "Extra", NULL };
 static const char **section_keys[] = {
 	setup_keys, NULL, options_keys, NULL, NULL, NULL, NULL, run_keys,
 	dos_keys, dos_keys, system_keys, set_keys, set_keys, progman_keys,
 	hexpatch_keys, NULL, NULL, NULL, NULL, NULL, languages_keys,
-	NULL
+	NULL, extras_keys
 };
 
 static int known( const char **list, const char *key )
@@ -340,7 +341,7 @@ int gdi_check( const char *ini, void (*out)( const char *text ) )
 						problem( "Option=%s: no on|, off| or ?NAME|%s", e, "" );
 					continue;
 				}
-				if ( same( section, "Languages" ) )
+				if ( same( section, "Languages" ) || same( section, "Extras" ) )
 					continue;
 				condition( e );
 				continue;

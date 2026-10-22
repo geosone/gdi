@@ -62,6 +62,26 @@ stays as the later package left it, and the earlier package hands its backup
 package removes it at its own removal. Whatever the order of removal, the
 original comes back in the end.
 
+## Several packages in one directory: SetupDir=
+
+Normally `INSTALL.EXE`, `INSTALL.INI` and the journals are in `%DIR%`, so
+each package needs a directory of its own. With `[Setup] SetupDir=` they
+go to a subdirectory of `%DIR%` instead, and several packages can put their
+files into the same directory:
+
+```ini
+[Setup]
+Id=AHCIASPI
+DefaultDir=%BOOT%\OPENASPI     ; AHCIASPI.SYS etc. in C:\OPENASPI
+SetupDir=AHCIASPI              ; INSTALL.EXE, INSTALL.INI, INSTALL.LOG in C:\OPENASPI\AHCIASPI
+```
+
+`GDI.INI` names the setup directory; `C:\OPENASPI\AHCIASPI\INSTALL /U`
+removes the files of this package only and its setup directory, and
+`C:\OPENASPI` stays as long as another package uses it (its setup directory
+takes it over). A file that two packages install (a shared driver) is
+handed over as described above.
+
 ## All installed packages: INSTALL /M
 
 `INSTALL /M` lists the packages in `GDI.INI` `[Installed]` with name,

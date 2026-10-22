@@ -16,6 +16,8 @@ Position=bottom                 ; top or bottom (default: bottom)
 [Autoexec.bat]
 Add=...                         ; default position: top (after @ECHO OFF)
 Extend=5,?CDEX|MSCDEX,SHSUCDX| /D:ASPICD0|%CDEX% /D:ASPICD0
+PathAppend=3|%DIR%              ; %DIR% in the PATH (option 3)
+PathRemove=%BOOT%\AHCIASPI;%BOOT%\EZSCSI   ; out of the PATH (older versions)
 Replace=yes                     ; write a new file (the old one is kept as backup)
 ```
 
@@ -25,6 +27,19 @@ Replace=yes                     ; write a new file (the old one is kept as backu
 - `Extend=condition|programs|text|new line` appends the text to the first
   line that starts one of the programs, or adds the new line when there is
   none (above: `/D:ASPICD0` for MSCDEX or SHSUCDX).
+- `PathAppend=condition|directory` puts the directory into the `PATH`, so
+  that the programs of the package start from any directory (DOS, and the
+  DOS boxes of Windows 3.x and 9x): it is appended to the last line that
+  sets the `PATH` (`PATH x`, `PATH=x`, `SET PATH=x`) unless it is there
+  already; without such a line Setup adds `PATH %PATH%;directory` (the
+  `PATH` Windows 9x sets stays). Tie it to an option, so that the user
+  decides. `INSTALL /U` takes the directory out again, and the line when
+  only `PATH %PATH%` is left; not while another package has its setup
+  directory in it (`SetupDir=`, packages sharing a directory).
+- `PathRemove=directory[;directory...]` takes the directories out of every
+  `PATH` line (one per line or separated by `;`), at
+  installation and at `INSTALL /U` (like `Remove=`): only that part, the
+  rest of the line stays (`PATH ;` when it named nothing else).
 - `Replace=yes` writes a new file; the old one is kept as backup.
 
 **Where lines go:**

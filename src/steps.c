@@ -200,13 +200,27 @@ void detect_all( void )
 	}
 }
 
-/* the files of [Find] that come from the installation disk go to %DIR% */
+/* the files of [Find] that come from the installation disk go to %DIR%;
+ * the others are taken from %DIR% when another package put them there
+ * (a directory several packages share), before those found elsewhere */
 void find_dest( void )
 {
 	int i;
-	for ( i = 0; i < nfind; i++ )
-		if ( finds[i].file[0] )
+	char list[120], p[80], *f;
+	for ( i = 0; i < nfind; i++ ) {
+		if ( finds[i].file[0] ) {
 			path_cat( finds[i].path, dest, finds[i].file );
+			continue;
+		}
+		sprintf( list, "%.119s", ini_get( "Find", finds[i].name, "" ) );
+		for ( f = strtok( list, " ," ); f; f = strtok( NULL, " ," ) ) {
+			path_cat( p, dest, f );
+			if ( strlen( f ) < 13 && file_exists( p ) ) {
+				strcpy( finds[i].path, p );
+				break;
+			}
+		}
+	}
 }
 
 void show_text( const char *title, const char *file, const char **buttons, int n, int must )
@@ -438,8 +452,9 @@ void ask_dirs( void )
 	strcpy( dest, answer_dir[0] && !in_batch ? answer_dir : ini_get( "Setup", "DefaultDir", "C:\\PROGRAM" ) );
 	expand( dest, dest, sizeof(dest) );
 	if ( in_batch ) {   /* [Installer]: the default directory, no questions */
-		gdi_note_parents( dest, dest_top );
-		if ( mkdirs( dest ) )
+		setup_dir();
+		gdi_note_parents( jdir, dest_top );
+		if ( mkdirs( jdir ) )
 			fail( T( "DirError" ) );
 		find_dest();
 		return;
@@ -447,8 +462,9 @@ void ask_dirs( void )
 	for ( ;; ) {
 		if ( ui_input( T( "DirTitle" ), T( "DirText" ), dest, 64 ) )
 			abort_setup();
-		gdi_note_parents( dest, dest_top );
-		if ( strlen( dest ) >= 3 && dest[1] == ':' && dest[2] == '\\' && !mkdirs( dest ) )
+		setup_dir();
+		gdi_note_parents( jdir, dest_top );
+		if ( strlen( dest ) >= 3 && dest[1] == ':' && dest[2] == '\\' && !mkdirs( jdir ) )
 			break;
 		{
 			static const char *ok[] = { "OK" };
@@ -597,6 +613,13 @@ int confirm( void )
 		if ( ( t = cond_new( "Autoexec.bat", "Extend", v ) ) != NULL && !ext_split( t, m, x, n ) && strlen( text ) + strlen( x ) + 60 < sizeof(text) )
 			sprintf( text + strlen( text ), "%s\\AUTOEXEC.BAT: %s ... %s\n", boot, m, x );
 	}
+	pos = 0;   /* PathAppend: the directory in the PATH */
+	while ( ( pos = ini_next( "Autoexec.bat", "PathAppend", pos, &v ) ) >= 0 )
+		if ( ( t = cond_new( "Autoexec.bat", "PathAppend", v ) ) != NULL ) {
+			expand( line, t, sizeof(line) );
+			if ( strlen( text ) + strlen( line ) + 40 < sizeof(text) )
+				sprintf( text + strlen( text ), "%s\\AUTOEXEC.BAT: PATH ...;%s\n", boot, line );
+		}
 	if ( windir[0] ) {
 		pos = 0;
 		while ( ( pos = ini_next( "System.ini", "Add", pos, &v ) ) >= 0 )

@@ -114,6 +114,7 @@ Accept=Akzeptieren
 | `License=` | license file(s), see below |
 | `Readme=` | text file offered at the end |
 | `DefaultDir=` | proposed target directory (`%DIR%`) |
+| `SetupDir=` | a subdirectory of `%DIR%` for `INSTALL.EXE`/`INSTALL.INI` and the journals, so that several packages can share `%DIR%` (see [Uninstall and updates](uninstall-update.md)) |
 | `Done=` | text of the last dialog |
 | `Uninstall=` | `yes` (default): copy `INSTALL.EXE`/`INSTALL.INI` to the target for `INSTALL /U` |
 | `Texts=` | the section of `src/language.ini` for the texts (default: the language of the system) |
@@ -138,6 +139,11 @@ continues. Use `Name|file` to name the component in the dialog title, or only
 `file` for the generic title. Repeated plain `License=` entries are also
 accepted. A package may select at most nine licenses (`License1` through
 `License9`). License-file paths are relative to `INSTALL.EXE`.
+
+The texts of `License=` and `Readme=` are shown 72 columns wide: a longer
+line is wrapped at a space, and its rest starts the next line of the
+paragraph (a text written for 80 columns reads as a paragraph); shorter
+lines, tables and empty lines stay as they are. Tabs stop every 8 columns.
 
 A license is shown once per run: it is known by its name, one without a name
 by its text. Packages of a [combined setup](combined-setup.md) that share a

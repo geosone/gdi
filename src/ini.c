@@ -163,18 +163,71 @@ int ini_lines( const char *section, int pos, const char **l )
 }
 
 /* text file as an array of lines (tabs expanded); NULL if not found */
+/* the width of the text viewer: longer lines are wrapped */
+#define TEXT_WIDTH 72
+
+/* appends a copy of s (len characters) to the lines; 0 when out of memory */
+static int text_add( ftext **l, int *n, int *max, const char *s, int len )
+{
+	char __far *p;
+	if ( *n == *max ) {
+		ftext *t = _frealloc( *l, ( *max * 2 ) * sizeof(char __far *) );
+		if ( !t )
+			return 0;
+		*l = t;
+		*max *= 2;
+	}
+	if ( !( p = _fmalloc( len + 1 ) ) )
+		return 0;
+	_fmemcpy( p, s, len );
+	p[len] = 0;
+	( *l )[( *n )++] = p;
+	return 1;
+}
+
+/* a line wrapped (text, indentation): to lines[]; long lines are wrapped at
+ * a space, the next lines keep the indentation.  The rest after the last
+ * break goes to carry (it starts the next line of the paragraph); 0 when
+ * out of memory */
+static int text_wrap( ftext **l, int *n, int *max, const char *out, int o,
+	int ind, char *carry, int *carry_ind )
+{
+	char part[200];
+	int start = 0, b, w;
+	while ( o - start > TEXT_WIDTH - ( start ? ind : 0 ) ) {
+		w = TEXT_WIDTH - ( start ? ind : 0 );
+		for ( b = start + w; b > start + ( start ? 0 : ind ) && out[b] != ' '; b-- )
+			;
+		if ( b <= start + ( start ? 0 : ind ) )
+			b = start + w;   /* no space: cut */
+		memset( part, ' ', start ? ind : 0 );
+		memcpy( part + ( start ? ind : 0 ), out + start, b - start );
+		if ( !text_add( l, n, max, part, ( start ? ind : 0 ) + b - start ) )
+			return 0;
+		for ( start = b; out[start] == ' '; start++ )
+			;
+	}
+	if ( start ) {   /* the rest of a wrapped line */
+		strcpy( carry, out + start );
+		*carry_ind = ind;
+		return 1;
+	}
+	return text_add( l, n, max, out, o );
+}
+
 ftext *text_load( const char *path, int *nlines )
 {
 	FILE *f = fopen( path, "r" );
-	char buf[200];
+	char buf[200], carry[200];
 	ftext *l;
-	int n = 0, max = 64;
+	int n = 0, max = 64, ok = 1, carry_ind = 0;
 	if ( !f )
 		return NULL;
+	carry[0] = 0;
 	l = _fmalloc( max * sizeof(char __far *) );
-	while ( l && fgets( buf, sizeof(buf), f ) ) {
-		char out[200], __far *p;
-		int i, o = 0;
+	while ( l && ok && fgets( buf, sizeof(buf), f ) ) {
+		char out[200];
+		int i, o = 0, ind = 0;
 		for ( i = 0; buf[i] && buf[i] != '\n' && buf[i] != '\r' && buf[i] != 0x1A && o < 190; i++ )
 			if ( buf[i] == '\t' )
 				do out[o++] = ' '; while ( o % 8 && o < 190 );
@@ -183,18 +236,31 @@ ftext *text_load( const char *path, int *nlines )
 			else
 				out[o++] = buf[i];
 		out[o] = 0;
-		if ( n == max ) {
-			ftext *t = _frealloc( l, ( max *= 2 ) * sizeof(char __far *) );
-			if ( !t )
-				break;
-			l = t;
+		while ( ind < o && ind < 24 && out[ind] == ' ' )
+			ind++;
+		if ( *carry ) {
+			/* the next line of the paragraph starts with the rest */
+			if ( ind < o && ind >= carry_ind && strlen( carry ) + o + 2 < sizeof(out) ) {
+				char tmp[200];
+				sprintf( tmp, "%.*s%s %s", ind, out, carry, out + ind );
+				strcpy( out, tmp );
+				o = strlen( out );
+			} else {
+				char tmp[200];
+				sprintf( tmp, "%*s%s", carry_ind, "", carry );
+				ok = text_add( &l, &n, &max, tmp, strlen( tmp ) );
+			}
+			*carry = 0;
 		}
-		if ( !( p = _fmalloc( o + 1 ) ) )
-			break;
-		_fstrcpy( p, out );
-		l[n++] = p;
+		if ( ok )
+			ok = text_wrap( &l, &n, &max, out, o, ind, carry, &carry_ind );
 	}
-	if ( l && !feof( f ) ) {        /* out of memory: no half license */
+	if ( ok && *carry ) {
+		char tmp[200];
+		sprintf( tmp, "%*s%s", carry_ind, "", carry );
+		ok = text_add( &l, &n, &max, tmp, strlen( tmp ) );
+	}
+	if ( l && ( !ok || !feof( f ) ) ) {   /* out of memory: no half license */
 		text_free( l, n );
 		l = NULL;
 	}

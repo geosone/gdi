@@ -88,7 +88,7 @@ void record_write( int add )
 	for ( i = 0; i < nopt; i++ )
 		bits[i] = opt_on[i] ? '1' : '0';
 	bits[nopt] = 0;
-	sprintf( value, "%s|%s|%.23s", dest, bits, ini_get( "Setup", "Version", "" ) );
+	sprintf( value, "%s|%s|%.23s", jdir, bits, ini_get( "Setup", "Version", "" ) );
 	gdi_record_write( boot, key, add ? value : NULL );
 }
 
@@ -119,7 +119,7 @@ void find_update( void )
 	if ( !in_batch && ui_message( T( "UpdateTitle" ), text, b, 2, 0, 0 ) != 0 )
 		abort_setup();
 	update_mode = 1;
-	strcpy( dest, dir );
+	dirs_from_setup_dir( dir );
 	find_dest();
 	old_entries_load( p );   /* before the new INSTALL.INI replaces it */
 	for ( i = 0; i < nopt && bits[i]; i++ )
@@ -390,12 +390,12 @@ void copy_all( void )
 
 	progtitle = T( "CopyTitle" );
 	if ( unin ) {
-		path_cat( to, dest, "INSTALL.LOG" );
+		path_cat( to, jdir, "INSTALL.LOG" );
 		old_log_load( to );
 		logf = fopen( to, "w" );
 		if ( *dest_top ) {
 			FILE *f;
-			path_cat( to, dest, "DIRS.LOG" );
+			path_cat( to, jdir, "DIRS.LOG" );
 			if ( ( f = fopen( to, "w" ) ) != NULL ) {
 				fprintf( f, "%s\n", dest_top );
 				fclose( f );
@@ -453,11 +453,11 @@ void copy_all( void )
 	if ( unin ) {
 		/* INSTALL /U in the target directory removes the installation */
 		path_cat( from, srcdir, "INSTALL.EXE" );
-		path_cat( to, dest, "INSTALL.EXE" );
+		path_cat( to, jdir, "INSTALL.EXE" );
 		ui_progress( progtitle, "INSTALL.EXE", ++done, total );
 		copy_file( from, to );
 		path_cat( from, srcdir, "INSTALL.INI" );
-		path_cat( to, dest, "INSTALL.INI" );
+		path_cat( to, jdir, "INSTALL.INI" );
 		ui_progress( progtitle, "INSTALL.INI", ++done, total );
 		copy_file( from, to );
 	}
@@ -662,7 +662,7 @@ void remove_all( void )
 		ui_clear();
 		abort_setup();
 	}
-	strcpy( dest, srcdir );
+	dirs_from_setup_dir( srcdir );
 	for ( pos = 0; pos < MAXOPT; pos++ )
 		opt_on[pos] = 1;
 	find_windows();
@@ -670,7 +670,7 @@ void remove_all( void )
 	edit_all();
 	progman_undo();
 	pending = uninstall_registry();
-	path_cat( p, dest, "INSTALL.LOG" );
+	path_cat( p, jdir, "INSTALL.LOG" );
 	if ( ( logf = fopen( p, "r" ) ) != NULL ) {
 		/* the files installed (from archives: also below %DIR%); a
 		 * replaced file comes back from its backup */
@@ -704,7 +704,7 @@ void remove_all( void )
 		}
 		fclose( logf );
 		logf = NULL;
-		path_cat( p, dest, "INSTALL.LOG" );
+		path_cat( p, jdir, "INSTALL.LOG" );
 		remove( p );
 	}
 	pos = 0;
@@ -723,10 +723,10 @@ void remove_all( void )
 	}
 	record_write( 0 );
 	if ( !keep_uninstaller && !pending ) {
-		path_cat( p, dest, "INSTALL.INI" );
+		path_cat( p, jdir, "INSTALL.INI" );
 		remove( p );
-		path_cat( p, dest, "INSTALL.EXE" );
+		path_cat( p, jdir, "INSTALL.EXE" );
 		remove( p );
-		gdi_remove_dirs( dest );
+		gdi_remove_dirs( jdir );
 	}
 }

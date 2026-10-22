@@ -40,3 +40,26 @@ MS-DOS 7.1 disk set builder that uses all this is the msdosinst project:
 
 Packages installed through `Extras=yes` cannot have `[Registry]` entries
 yet (see [Registry](registry.md)).
+
+### Further software named in advance: [Extras]
+
+`[Extras]` names packages that are offered with the options (a list to
+check) and installed after the main setup, each from its own disk:
+
+```ini
+[Extras]
+Extra=on|AHCIASPI|AHCIASPI - CD/DVD drives on SATA/AHCI
+Extra=off|EUSBASPI|EUSBASPI - USB drives
+Extra=off|OPENASPI|OpenASPI - SCSI adapters|R:\OPENASPI
+```
+
+The fields are the default (`on`/`off`), the `Id=` of the package (or its
+`Product=` without `Id=`), the text in the list and, optionally, its
+directory. For each package checked Setup asks for its disk (the directory
+proposed is `ExtrasDir=`, `A:\` by default; Cancel skips the package) and
+checks the `Id=` of the `INSTALL.INI` there: for a disk with another
+package or none Setup offers Retry (after the right disk is in) or Skip,
+so a package checked by mistake can always be left out. A package with a directory of its own (on a setup CD) is
+installed from there without a question; when that directory is not there
+(Setup was started from disks), Setup asks for its disk. With `Extras=yes` Setup asks afterwards for
+further software as before.
