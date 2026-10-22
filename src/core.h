@@ -137,6 +137,7 @@ void extras( void );
 int core_run( void );
 
 /* combined.c */
+void check_requires( void );
 void batch_choices( void );
 void run_installers( void );
 void finish( void );

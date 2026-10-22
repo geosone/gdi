@@ -108,11 +108,14 @@ Accept=Akzeptieren
 | `Product=` | top bar, right; the name in lists and messages |
 | `Id=` | key of the installation in `GDI.INI` (default: `Product=`) |
 | `Version=` | shown when an update is offered |
+| `Requires=` | Ids of packages this one needs, separated by commas (see [Combined setup](combined-setup.md)) |
+| `Conflicts=` | Ids of packages this one cannot be installed together with |
 | `License=` | license file(s), see below |
 | `Readme=` | text file offered at the end |
 | `DefaultDir=` | proposed target directory (`%DIR%`) |
 | `Done=` | text of the last dialog |
 | `Uninstall=` | `yes` (default): copy `INSTALL.EXE`/`INSTALL.INI` to the target for `INSTALL /U` |
+| `Texts=` | the section of `src/language.ini` for the texts (default: the language of the system) |
 | `Windows=` | `no`: refuse to run under Windows (text `[Text] NeedDos`), for packages that replace files Windows has open |
 | `Archive=` | take the files from a GDA archive |
 | `Mode=`, `Drive=`, `Fdisk=`, `Format=`, `Extras=`, `ExtrasDir=` | DOS mode |

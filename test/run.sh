@@ -6,7 +6,8 @@
 #   UNINST=1 test/run.sh   install, then INSTALL /U from the target directory
 #   PKG=dir TARGET=NAME test/run.sh   install a distribution directory
 #                       (all files of dir, its INSTALL.INI) into A:\NAME
-#   PKG=test/combined TARGET=PKGA KEYS=... test/run.sh   [Installer]
+#   PKG=test/combined ONEEXE=1 TARGET=PKGA KEYS=... test/run.sh   [Installer]
+#   PKG=test/depends ONEEXE=1 DEPENDS=1 test/run.sh   Requires=, Conflicts=
 # Environment: BOOTIMG (DOS boot floppy), INI, KEYS, TIMEOUT
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -21,7 +22,9 @@ ARGS=${ARGS:-}
 if [ -n "${PKG:-}" ]; then
     cp -r "$PKG"/* "$OUT/src/"
     # the installer next to every INSTALL.INI of the distribution
+    # (ONEEXE=1: only next to the top one, the floppy is small)
     find "$OUT/src" -name INSTALL.INI | while read -r i; do
+        [ -n "${ONEEXE:-}" ] && [ "$(dirname "$i")" != "$OUT/src" ] && continue
         [ -f "$(dirname "$i")/INSTALL.EXE" ] || cp "$ROOT/build/INSTALL.EXE" "$(dirname "$i")/"
     done
 else
@@ -89,6 +92,13 @@ if [ -n "${LANGUAGE:-}" ]; then
     mcopy -o -i "$P" ::/TESTLANG/SETTINGS.INI "$OUT/LANGUAGE.INI"
     python3 -c 'import configparser,sys; c=configparser.ConfigParser(); c.read(sys.argv[1]); assert c["Language"]["Selected"] == "de"; assert c["Keep"]["Value"] == "preserved"' "$OUT/LANGUAGE.INI" || exit 1
     echo "DOS language selection integration passed"
+fi
+if [ -n "${DEPENDS:-}" ]; then
+    # B is required by A: selected as well and installed first; C conflicts
+    mcopy -o -i "$P" ::/GDI.INI "$OUT/GDI.INI"
+    python3 -c 'import sys; k=[l.split("=")[0] for l in open(sys.argv[1]).read().splitlines() if "=" in l]; assert k == ["GDI-B", "Package A"], k' "$OUT/GDI.INI" || exit 1
+    ! mdir -i "$P" ::/PKGC >/dev/null 2>&1 || exit 1
+    echo "DOS Requires/Conflicts integration passed"
 fi
 if [ -n "${SYSTEMSET:-}" ]; then
     mcopy -o -i "$P" ::/WINDOWS/SYSTEM.INI "$OUT/SYSTEM-AFTER.INI"

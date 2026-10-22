@@ -1,0 +1,2 @@
+Test license
+Shared by both packages.

@@ -27,5 +27,33 @@ packages that failed or were cancelled.
   plain DOS, the runner in each package directory applies them at the
   next Windows start (see [Windows](windows.md)).
 
-Under Windows the Win16 frontend starts the DOS engine, which shows the
-package list in its DOS window.
+## Requires= and Conflicts=
+
+A package names the packages it needs and the ones it cannot be used with
+in its `[Setup]`, by their Ids (`Id=`, else `Product=`, the keys of
+`GDI.INI`), separated by commas:
+
+```ini
+[Setup]
+Product=Notepad from Windows 95
+Requires=W3U-OLE2           ; needs OLE 2
+Conflicts=W3U-USERME        ; both replace USER.EXE
+```
+
+In a combined setup, after the package list:
+
+- a required package of the list that is not installed is selected as
+  well, and installed before the packages that need it; Setup names the
+  packages it added (Back returns to the list);
+- a package whose required package is neither in the list nor installed is
+  left out, with a message;
+- packages that conflict with each other or with an installed package send
+  Setup back to the list (with `Select=no`: Setup stops).
+
+A single package whose required package is not installed, or that conflicts
+with an installed one, asks whether to continue anyway (default: Cancel).
+
+Under Windows the Win16 frontend shows the package list and the messages in
+its own windows; when a package needs the DOS engine (`Mode=DOS`,
+`[Detect]`, `[Run] Before=`/`After=`), the engine shows them in its DOS
+window.

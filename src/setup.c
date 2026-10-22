@@ -104,8 +104,10 @@ static void write_language( void )
 void install_steps( void )
 {
 	char registry_error[130];
-	if ( !in_batch )
+	if ( !in_batch ) {
 		welcome();
+		check_requires();
+	}
 	find_update();
 	if ( !in_batch )   /* [Installer]: asked for all packages before */
 		license();
