@@ -30,6 +30,12 @@ extern const char *opt_label[MAXOPT];
 extern char opt_value[MAXOPT][24];   /* %On%: value when option n is on */
 extern int nopt;
 extern int uninstall, keep_uninstaller, dosmode, bootset;
+extern int manage;                      /* INSTALL /M: the installed packages */
+/* INSTALL /M in Windows: WIN.INI, groups and registry of a removed package
+ * (its journals in dir) are restored by the frontend */
+extern void (*gdi_removed_hook)( const char *dir );
+extern char answer_file[80], answer_dir[80], answer_win[80];   /* INSTALL /S[:file] */
+void answers_load( void );
 extern const char *option_override;     /* /O:0101 from the Win16 frontend */
 extern struct gdi_find finds[MAXFIND];   /* [Find] */
 extern int nfind;
@@ -92,6 +98,9 @@ int patch_variant_split( const char *value, PatchVariant *variant );
 int hexpatch_needs_windows( void );
 void patch_all( void );
 void edit_file( const char *path, const char *section, int kind );
+int ini_set_file( const char *text, char *path, const char **rest );
+int change_split( const char *text, char *sec, char *old, char *line );
+void ini_files( void );
 
 /* winplan.c */
 int frontend( void );
@@ -117,9 +126,13 @@ void read_options( void );
 void ask_options( void );
 void ask_dirs( void );
 int confirm( void );
+unsigned long package_space( void );
+void check_space( char drive, unsigned long need );
+void check_versions( void );
 int find_used( const char *name );
 
 /* files.c */
+int file_version( const char *path, unsigned long *ms, unsigned long *ls );
 int record_read_key( const char *key, char *dir, char *bits, char *version );
 void record_write( int add );
 void find_update( void );
@@ -140,6 +153,7 @@ int core_run( void );
 void check_requires( void );
 void batch_choices( void );
 void run_installers( void );
+void manage_installed( void );
 void finish( void );
 
 /* the platform: dossys.c (DOS) or winsys.c (the Windows frontend) */
@@ -147,3 +161,4 @@ int spawn_program( const char *cmdline );   /* exit status, -1: not run */
 int windows_running( void );
 void ask_reboot( const char *text );        /* does not return */
 void dos_prepare( void );                   /* DOS mode: the hard disk */
+void profile_flush( const char *path );     /* Windows: its INI cache to disk */

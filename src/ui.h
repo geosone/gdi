@@ -19,6 +19,9 @@ int  ui_checklist( const char *title, const char *text, const char **items, char
 /* progress: called with done = 0 first */
 void ui_progress( const char *title, const char *text, long done, long total );
 
+/* INSTALL /S: every question takes its default (ui_dos.c, ui_win16.c) */
+extern int ui_unattended;
+
 /* lang.c: a text of the installer: [Text] of INSTALL.INI, else the text of
  * the language of the system (src/language.ini), else the English one */
 const char *gdi_text( const char *key );
@@ -28,3 +31,7 @@ int  gdi_text_language( const char *name );
 const char *gdi_text_name( void );
 /* forget the texts in use (the Windows frontend changes the code page) */
 void gdi_text_reset( void );
+/* the section for an sLanguage= or a country code of a Windows; -1: none */
+int  gdi_language_find( const char *slanguage, int country );
+/* the text key of section lang (-1: the installer's), DOS code page */
+void gdi_text_copy( int lang, const char *key, char *out, int size );

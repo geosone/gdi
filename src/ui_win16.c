@@ -138,6 +138,8 @@ LRESULT CALLBACK ui_proc( HWND window, UINT message, WPARAM wparam, LPARAM lpara
     return DefWindowProc( window, message, wparam, lparam );
 }
 
+int ui_unattended;
+
 void ui_init( void )
 {
     if ( !registered ) {
@@ -305,6 +307,8 @@ int ui_message( const char *title, const char *text, const char **buttons, int n
 {
     HWND window;
     int x = error ? MARGIN + 32 + MARGIN : MARGIN, height, bh;
+    if ( ui_unattended )
+        return sel;
     if ( n > MAXBUTTON )
         n = MAXBUTTON;
     height = text_height( ansi( text ), WIDTH - x - MARGIN );
@@ -330,6 +334,8 @@ int ui_input( const char *title, const char *text, char *buf, int max )
     static const char *b[2];
     HWND window, edit;
     int height, y, bh, rc;
+    if ( ui_unattended )
+        return 0;
     b[0] = gdi_text( "OK" );
     b[1] = gdi_text( "Cancel" );
     height = text_height( ansi( text ), WIDTH - 2 * MARGIN );
@@ -363,6 +369,8 @@ int ui_view( const char *title, ftext *lines, int nlines, const char **buttons, 
     void __far *h;
     unsigned long size = 1;
     int i, bh, height = 18 * char_height, rc;
+    if ( ui_unattended )
+        return sel;
     for ( i = 0; i < nlines; i++ )
         size += _fstrlen( lines[i] ) + 2;
     if ( size > 0xF000 )
@@ -416,6 +424,8 @@ int ui_checklist( const char *title, const char *text, const char **items, char 
     static const char *b[2];
     HWND window, list;
     int height, rows = n < 14 ? n : 14, y, bh, i, rc;
+    if ( ui_unattended )
+        return 0;
     b[0] = gdi_text( "OK" );
     b[1] = gdi_text( "Cancel" );
     height = text_height( ansi( text ), WIDTH - 2 * MARGIN );

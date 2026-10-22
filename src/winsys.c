@@ -63,3 +63,10 @@ void dos_prepare( void )
 {
 	fail( T( "NeedDos" ) );
 }
+
+/* Windows keeps an INI file it read in a cache: write it to disk first */
+void profile_flush( const char *path )
+{
+	(void)path;
+	WritePrivateProfileString( NULL, NULL, NULL, NULL );
+}

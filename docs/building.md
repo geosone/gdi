@@ -30,7 +30,7 @@ registry (`REG.DAT`) logically.
 
 | Command | Test |
 |---|---|
-| `make test-host` | binary-patch checks, registry plan/type/journal validation and Program Manager group files |
+| `make test-host` | binary-patch checks, registry plan/type/journal validation, Program Manager group files and `gdicheck` |
 | `test/run.sh` | installation |
 | `WINDOWS=1 HEXPATCH=1 INI=test/TESTHEX.INI test/run.sh` | DOS binary-patch integration (add `TARGET=TESTHEX UNINST=1` for reverse) |
 | `KEYS="ret ret ret ret ret ret ret ret ret" UNKEYS="r ret ret ret" UNINST=1 test/run.sh` | installation and `INSTALL /U` |
@@ -38,7 +38,15 @@ registry (`REG.DAT`) logically.
 | `test/win3x.sh` | `[Win.ini]`, `[ProgMan]`, `[Registry]` (`Set=` and `Import=`) and replaced files from plain DOS, then Windows 3.11 (the runner), uninstall and Windows again; registry and `WIN.INI` must be as before |
 | `FRONTEND=1 START=25 STEP=4 test/win3x.sh` | the same through the Win16 frontend (profile functions, DDE) |
 | `UPDATE=1 test/win3x.sh` | version 2.0 (new Program Manager item, WIN.INI value and SYSTEM.INI line) over 1.0 with a changed settings file and WIN.INI value, then uninstall (add `FRONTEND=1 START=25 STEP=4` for the frontend) |
-| `PKG=test/combined TARGET=PKGA KEYS="ret ret ret ret ret ret ret ret ret ret" test/run.sh` | `[Installer]` with two packages that share a license |
+| `PKG=test/combined ONEEXE=1 TARGET=PKGA KEYS="ret ret ret ret ret ret ret ret ret" test/run.sh` | `[Installer]` with two packages that share a license |
+| `PKG=test/depends ONEEXE=1 DEPENDS=1 TARGET=PKGA KEYS="ret down down spc ret ret down down spc ret ret ret ret ret ret ret ret ret ret" test/run.sh` | `Requires=` (B chosen with A and installed first) and `Conflicts=` |
+| `PKG=test/depends ONEEXE=1 MANAGE=1 TARGET=PKGA TIMEOUT=15 KEYS="ret down down spc ret ret down down spc ret ret ret ret ret ret ret ret spc down spc ret r ret" test/run.sh` | the same, then both removed by `INSTALL /M` |
+| `PKG=test/owner ONEEXE=1 OWNER=1 TARGET=PKGY TIMEOUT=15 KEYS="ret ret ret ret r ret r ret" test/run.sh` | a file replaced by two packages, the first one removed first |
+| `INI=test/TESTINI.INI WINDOWS=1 INIFILES=1 TARGET=TESTINI KEYS="ret ret ret ret ret" test/run.sh` | `[Ini] Set=` and `[System.ini] Change=` (add `UNINST=1` for reverse) |
+| `PKG=test/newer TARGET=NEWTEST NEWER=1 KEYS="ret ret ret ret" test/run.sh` | `[Newer]`, plain and from an archive (add `UNINST=1` for reverse) |
+| `SILENT=1 TARGET=SILENT test/run.sh` | `INSTALL /S:` with an answer file |
+| `CHECK=1 test/run.sh` | `INSTALL /CHECK` in DOS |
+| `FRONTEND=1 SILENT=1 test/win3x.sh`, `FRONTEND=1 MANAGE=1 test/win3x.sh` | `INSTALL /S` and `INSTALL /M` under Windows |
 | `PKG=dir TARGET=NAME test/run.sh` | the distribution in `dir` (its `INSTALL.INI`), target `A:\NAME` |
 
 `test/registry` is a Windows 3.x VM fixture. It creates two temporary HKCR

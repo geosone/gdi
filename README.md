@@ -30,13 +30,15 @@ License: GNU General Public License version 3.
 
 ## Usage
 
-    INSTALL [/U] [/B:d:] [file.INI]
+    INSTALL [/U | /M | /S[:file] | /CHECK] [/B:d:] [file.INI]
 
 `INSTALL.EXE` reads `INSTALL.INI` (or the INI file given) from its own
 directory and takes the files from there. `/B:d:` names the drive of the
 system whose `CONFIG.SYS` and `AUTOEXEC.BAT` are changed (default: the boot
 drive). `INSTALL /U`, run from the target directory, removes the
-installation.
+installation; `INSTALL /M` lists all installed packages and removes those
+chosen. `INSTALL /S` installs without questions, `INSTALL /CHECK` (or
+`build/gdicheck` on the build host) checks an `INSTALL.INI`.
 
 A minimal package:
 

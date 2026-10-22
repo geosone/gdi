@@ -29,6 +29,8 @@
 static char *inst_path[MAXINST], *inst_label[MAXINST], *inst_choice[MAXINST];
 static char *inst_id[MAXINST], *inst_req[MAXINST], *inst_conf[MAXINST];
 static char inst_on[MAXINST], inst_state[MAXINST], inst_ok[MAXINST];
+static char inst_drive[MAXINST];          /* of DefaultDir= */
+static unsigned long inst_need[MAXINST];  /* KB, package_space() */
 static int ninst, cur_inst;
 static char maindir[80], mainwin[80];
 
@@ -174,15 +176,21 @@ static int requires_done( int i )
 /* the package list: until the choice is consistent */
 static void choose_installers( void )
 {
-	static char added[500], missing[500], conflicts[500], text[1600];
+	/* the texts on the heap: the data segment of the DOS engine is full */
+	char *added = malloc( 3 * 500 + 1600 ), *missing, *conflicts, *text;
 	static const char *b[2];
 	int select = stricmp( ini_get( "Installer", "Select", "yes" ), "no" ) != 0;
+	if ( !added )
+		gdi_out_of_memory();
+	missing = added + 500;
+	conflicts = missing + 500;
+	text = conflicts + 500;
 	for ( ;; ) {
 		if ( select && ui_checklist( T( "InstTitle" ),
 			T( "InstText" ), (const char **)inst_label, inst_on, ninst ) )
 			abort_setup();
 		ui_clear();
-		resolve( added, missing, conflicts, sizeof(added) );
+		resolve( added, missing, conflicts, 500 );
 		if ( *conflicts ) {
 			sprintf( text, "%s%s", T( "ConflictText" ), conflicts );
 			if ( !select )
@@ -192,8 +200,10 @@ static void choose_installers( void )
 			ui_clear();
 			continue;
 		}
-		if ( !*added && !*missing )
+		if ( !*added && !*missing ) {
+			free( added );
 			return;
+		}
 		*text = 0;
 		if ( *added )
 			sprintf( text, "%s%s", T( "NeedsAdded" ), added );
@@ -201,8 +211,10 @@ static void choose_installers( void )
 			sprintf( text + strlen( text ), "%s%s%s", *text ? "\n\n" : "", T( "NeedsMissing" ), missing );
 		b[0] = T( "Continue" );
 		b[1] = T( "Back" );
-		if ( !ui_message( T( "InstTitle" ), text, b, select ? 2 : 1, 0, 0 ) )
+		if ( !ui_message( T( "InstTitle" ), text, b, select ? 2 : 1, 0, 0 ) ) {
+			free( added );
 			return;
+		}
 		ui_clear();
 	}
 }
@@ -223,8 +235,12 @@ void batch_choices( void )
 /* first pass: licenses, options and language of package cur_inst */
 static void batch_ask( void )
 {
-	char c[MAXOPT + 12];
+	char c[MAXOPT + 12], d[80];
 	int i;
+	check_versions();
+	expand( d, ini_get( "Setup", "DefaultDir", "C:\\PROGRAM" ), sizeof(d) );
+	inst_drive[cur_inst] = d[0];
+	inst_need[cur_inst] = package_space();
 	find_update();
 	license();
 	ui_clear();
@@ -392,6 +408,23 @@ void run_installers( void )
 	for ( i = 0; i < ninst; i++ )
 		if ( inst_on[i] && !inst_state[i] )
 			run_one( i, 0 );
+	/* the room for all chosen packages, per drive */
+	for ( i = 0; i < ninst; i++ ) {
+		unsigned long need = 0;
+		int j;
+		if ( !inst_on[i] || inst_state[i] )
+			continue;
+		for ( j = 0; j < i && !( inst_on[j] && !inst_state[j] &&
+			toupper( (unsigned char)inst_drive[j] ) == toupper( (unsigned char)inst_drive[i] ) ); j++ )
+			;
+		if ( j < i )
+			continue;   /* that drive is counted */
+		for ( j = i; j < ninst; j++ )
+			if ( inst_on[j] && !inst_state[j] &&
+				toupper( (unsigned char)inst_drive[j] ) == toupper( (unsigned char)inst_drive[i] ) )
+				need += inst_need[j];
+		check_space( inst_drive[i], need );
+	}
 	do {
 		waiting = progress = 0;
 		for ( i = 0; i < ninst; i++ ) {
@@ -420,6 +453,120 @@ void run_installers( void )
 	ok[0] = T( "OK" );
 	ui_clear();
 	ui_message( T( "InstTitle" ), text, ok, 1, 0, 0 );
+}
+
+/* --- INSTALL /M: the installed packages (GDI.INI), some of them removed -- */
+#define MANAGETEXT 1500
+
+void manage_installed( void )
+{
+	static const char *b[2];
+	char *text = malloc( MANAGETEXT );
+	char p[80], l[200], dir[80], version[24], product[70], label[130], *e, *f;
+	FILE *g;
+	int in = 0, i, count = 0, removed = 0, rc;
+	if ( !text )
+		gdi_out_of_memory();
+	sprintf( p, "%s\\GDI.INI", boot );
+	ninst = 0;
+	if ( ( g = fopen( p, "r" ) ) != NULL ) {
+		while ( ninst < MAXINST && fgets( l, sizeof(l), g ) ) {
+			strip_eol( l );
+			if ( *l == '[' ) {
+				in = !strnicmp( l, "[Installed]", 11 );
+				continue;
+			}
+			if ( !in || !( e = strchr( l, '=' ) ) )
+				continue;
+			*e++ = 0;
+			sprintf( dir, "%.79s", e );
+			*version = 0;
+			if ( ( f = strchr( dir, '|' ) ) != NULL ) {
+				*f++ = 0;
+				if ( ( f = strchr( f, '|' ) ) != NULL )
+					sprintf( version, "%.23s", f + 1 );
+			}
+			path_cat( p, dir, "INSTALL.INI" );
+			ini_peek( p, "Product", product, sizeof(product) );
+			if ( !*product )
+				sprintf( product, "%.69s", l );
+			sprintf( label, "%s%s%s (%s)", product, *version ? " " : "", version, dir );
+			inst_id[ninst] = str_dup( l );
+			inst_path[ninst] = str_dup( dir );
+			inst_label[ninst] = str_dup( label );
+			inst_on[ninst] = inst_state[ninst] = 0;
+			ninst++;
+		}
+		fclose( g );
+	}
+	b[0] = T( "OK" );
+	if ( !ninst ) {
+		ui_message( T( "ManageTitle" ), T( "ManageNone" ), b, 1, 0, 0 );
+		free( text );
+		return;
+	}
+	if ( ui_checklist( T( "ManageTitle" ), T( "ManageText" ),
+		(const char **)inst_label, inst_on, ninst ) )
+		abort_setup();
+	for ( i = 0; i < ninst; i++ )
+		count += inst_on[i];
+	ui_clear();
+	if ( !count ) {
+		free( text );
+		return;
+	}
+	sprintf( text, T( "ManageConfirm" ), count );
+	b[0] = T( "Remove" );
+	b[1] = T( "Cancel" );
+	if ( ui_message( T( "ManageTitle" ), text, b, 2, 1, 0 ) ) {
+		ui_clear();
+		abort_setup();
+	}
+	/* the last installed first: a file replaced by two packages comes back */
+	strcpy( dir, srcdir );
+	for ( i = ninst - 1; i >= 0; i-- ) {
+		if ( !inst_on[i] )
+			continue;
+		path_cat( p, inst_path[i], "INSTALL.INI" );
+		ui_clear();
+		ini_save();
+		if ( ini_load( p ) ) {
+			ini_restore();
+			inst_state[i] = 2;
+			continue;
+		}
+		if ( !stricmp( ini_get( "Setup", "Windows", "yes" ), "no" ) && windows_running() ) {
+			ini_restore();
+			inst_state[i] = 4;   /* only from MS-DOS */
+			continue;
+		}
+		strcpy( srcdir, inst_path[i] );
+		ui_title( ini_get( "Setup", "Title", "Setup" ), ini_get( "Setup", "Product", "" ) );
+		in_extra = in_batch = uninstall = 1;
+		keep_uninstaller = !stricmp( srcdir, dir );   /* this program's own directory */
+		if ( ( rc = setjmp( extra_abort ) ) == 0 ) {
+			remove_all();
+			if ( gdi_removed_hook )
+				gdi_removed_hook( inst_path[i] );
+			inst_state[i] = 1;
+			removed++;
+		} else
+			inst_state[i] = rc == 1 ? 3 : 2;
+		in_extra = in_batch = uninstall = keep_uninstaller = 0;
+		ini_restore();
+		strcpy( srcdir, dir );
+	}
+	sprintf( text, T( "ManageDone" ), removed );
+	for ( i = 0; i < ninst; i++ )
+		if ( inst_on[i] && inst_state[i] != 1 && strlen( text ) + strlen( inst_label[i] ) + 60 < MANAGETEXT )
+			sprintf( text + strlen( text ), "\n%s: %s", inst_label[i],
+				inst_state[i] == 3 ? T( "InstCancelled" ) :
+				inst_state[i] == 4 ? T( "InstNeedDos" ) : T( "InstFailed" ) );
+	b[0] = T( "OK" );
+	ui_clear();
+	ui_title( ini_get( "Setup", "Title", "Setup" ), ini_get( "Setup", "Product", "GeosOne Dual Installer" ) );
+	ui_message( T( "ManageTitle" ), text, b, 1, 0, 0 );
+	free( text );
 }
 
 void finish( void )

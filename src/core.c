@@ -26,6 +26,9 @@ const char *opt_label[MAXOPT];
 char opt_value[MAXOPT][24];   /* %On%: value when option n is on */
 int nopt;
 int uninstall, keep_uninstaller, dosmode, bootset;
+int manage;
+void (*gdi_removed_hook)( const char *dir );
+char answer_file[80], answer_dir[80], answer_win[80];   /* INSTALL /S[:file] */
 const char *option_override;     /* /O:0101 from the Win16 frontend */
 struct gdi_find finds[MAXFIND];   /* [Find] */
 int nfind;

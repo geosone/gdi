@@ -27,13 +27,22 @@
 #include "regtxn.h"
 #include "progman.h"
 #include "core.h"
+#include "check.h"
+
+static void print_line( const char *text )
+{
+	puts( text );
+}
 
 static void usage( void )
 {
 	printf( "GeosOne Dual Installer " GDI_VERSION " - GNU GPL version 3\n"
-	        "INSTALL [/U] [/B:d:] [/O:bits] [/W:status] [file.INI]\n"
+	        "INSTALL [/U | /M | /S[:file] | /CHECK] [/B:d:] [/O:bits] [/W:status] [file.INI]\n"
 	        "  installs as described by INSTALL.INI next to INSTALL.EXE\n"
 	        "  /U    removes the installation (run INSTALL.EXE in the target directory)\n"
+	        "  /M    lists the installed packages (GDI.INI) and removes those chosen\n"
+	        "  /S[:file] installs without questions ([Answers] Dir=, Options=)\n"
+	        "  /CHECK checks the INI: unknown keys, missing files, conditions\n"
 	        "  /B:d: drive of the system to change (CONFIG.SYS, AUTOEXEC.BAT),\n"
 	        "        default: the boot drive\n"
 	        "  /L:   the texts: a section of language.ini (English, German, ...)\n"
@@ -50,7 +59,7 @@ int main( int argc, char **argv )
 {
 	char ini[80], *s;
 	const char *language = NULL;
-	int i;
+	int i, check = 0;
 
 	gdi_self = argv[0];
 	strcpy( srcdir, argv[0] );
@@ -61,8 +70,14 @@ int main( int argc, char **argv )
 	path_cat( ini, srcdir, "INSTALL.INI" );
 	for ( i = 1; i < argc; i++ ) {
 		if ( argv[i][0] == '/' || argv[i][0] == '-' ) {
-			if ( toupper( argv[i][1] ) == 'U' )
+			if ( !stricmp( argv[i] + 1, "CHECK" ) )
+				check = 1;
+			else if ( toupper( argv[i][1] ) == 'U' )
 				uninstall = 1;
+			else if ( toupper( argv[i][1] ) == 'M' && !argv[i][2] )
+				manage = 1;
+			else if ( toupper( argv[i][1] ) == 'S' && ( !argv[i][2] || argv[i][2] == ':' ) )
+				sprintf( answer_file, "%.79s", argv[i][2] ? argv[i] + 3 : "*" );
 			else if ( toupper( argv[i][1] ) == 'K' && !argv[i][2] )
 				keep_uninstaller = 1;
 			else if ( toupper( argv[i][1] ) == 'B' && argv[i][2] == ':' && isalpha( argv[i][3] ) ) {
@@ -117,6 +132,11 @@ int main( int argc, char **argv )
 			if ( strlen( srcdir ) == 2 && srcdir[1] == ':' )
 				strcat( srcdir, "\\" );
 		}
+	}
+	if ( check ) {
+		int n = gdi_check( ini, print_line );
+		printf( n ? "%d problems\n" : "no problems\n", n );
+		return n != 0;
 	}
 	if ( ini_load( ini ) ) {
 		printf( "INSTALL: %s not found\n", ini );

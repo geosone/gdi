@@ -51,6 +51,17 @@ Set=3|boot|shell=%DIR%\CALMIRA.EXE      ; section|key=value
 actually added are recorded in `%DIR%\SYSTEM.ADD`, and `INSTALL /U` removes
 exactly these, so a line that was there before stays.
 
+**Changed lines:** `Change=condition|section|old line|new line` replaces a
+line, also one whose key is there more than once (`device=`):
+
+```ini
+Change=1|386Enh|device=*vtd|device=%DIR%\VTDA.386
+```
+
+The lines replaced are recorded in `%DIR%\SYSTEM.CHG`; `INSTALL /U` puts the
+old line back while the new one is still there. When the old line is not in
+the section, nothing is changed.
+
 **Values:** `Set=condition|section|key=value` replaces one named value
 instead of adding a duplicate line. Setup records the exact previous line in
 `%DIR%\SYSTEM.SET`. Uninstall restores it only while the installed value is
@@ -68,19 +79,46 @@ The original file is kept as `SYSTEM.G01` (`.G02`, ...).
 which keeps `WIN.INI` in memory, the Win16 frontend writes the values with
 the profile functions. Both sides restore the same journal on `INSTALL /U`.
 
+## Other INI files
+
+`[Ini]` sets values in any INI file, for example the Control Panel entry of a
+`.CPL` in `CONTROL.INI`:
+
+```ini
+[Ini]
+Set=1|CONTROL.INI|MMCPL|kframe=%DIR%\KFRAME.CPL
+Set=%WINDIR%\APPS\TOOL.INI|Options|Mode=2
+```
+
+`Set=condition|file|section|key=value`: the file is a full path or a name in
+the Windows directory (Setup asks for it); a file that does not exist is
+created. `%DIR%\INI.SET` journals the file, section, key and previous line
+of every value; `INSTALL /U` puts the previous line back (or removes the
+key, its section when empty and a file Setup created) unless the user has
+changed the value since. Files in the Windows directory are written in the
+code page of Windows. Under Windows, Setup first writes the INI cache of
+Windows to disk. An update sets only the values that are new in its version.
+
 ## Program Manager
 
 `[ProgMan]` adds items to Windows 3.x groups:
 
 ```ini
 [ProgMan]
-Item=1|Zubehör|Calmira|%DIR%\CALMIRA.EXE
+Item=1|%ACCESSORIES%|Calmira|%DIR%\CALMIRA.EXE
 Item=2|Calmira|Hilfe|WINHELP.EXE %DIR%\CALMIRA.HLP|WINHELP.EXE|0
 ```
 
 The fields are condition, group, title, command line, icon file (default:
 the program of the command line) and icon index. A missing group is created.
 An item whose title is already in the group is left alone.
+
+The groups Windows Setup creates have names in the language of Windows. A
+group field `%MAIN%`, `%ACCESSORIES%`, `%GAMES%`, `%STARTUP%`, `%NETWORK%`
+or `%APPLICATIONS%` is that group of the Windows installed: Setup reads
+`sLanguage=` and `iCountry=` of `[intl]` in its `WIN.INI` and takes the name
+from `src/language.ini` (`GroupAccessories=Zubehör` for a German Windows,
+`Accessories` for an English one, English for a language not listed).
 
 In plain DOS the engine writes the `.GRP` files and `PROGMAN.INI` directly
 (Program Manager extracts the icons again on its next start); under Windows

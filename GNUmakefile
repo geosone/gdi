@@ -12,7 +12,7 @@ LINK := $(WATCOM)/binl/wlink
 COPT := -q -bt=dos -mm -0 -os -s -zq -wx -I$(WATCOM)/h -I$(OUT)
 WCOPT := -q -bt=windows -ml -zt100 -0 -zW -os -s -zq -w4 -we -I$(WATCOM)/h -I$(WATCOM)/h/win -I$(OUT)
 
-OBJS := $(addprefix $(OUT)/,dos.obj core.obj sysfiles.obj winplan.obj steps.obj files.obj setup.obj combined.obj dossys.obj lang.obj util.obj journal.obj ui_dos.obj ini.obj archive.obj hexpatch.obj regtxn.obj progman.obj)
+OBJS := $(addprefix $(OUT)/,dos.obj core.obj sysfiles.obj winplan.obj steps.obj files.obj setup.obj combined.obj dossys.obj lang.obj util.obj journal.obj ui_dos.obj ini.obj archive.obj hexpatch.obj regtxn.obj progman.obj check.obj)
 # the installer core, compiled for the Windows frontend as well
 WINCORE := core sysfiles winplan steps files setup combined archive hexpatch progman lang
 WINOBJS := $(OUT)/wininstall.obj $(OUT)/winnative.obj $(OUT)/winsys.obj $(OUT)/ui_win16.obj \
@@ -24,7 +24,11 @@ WINIMAGE := $(OUT)/INSTALL.UNP
 
 .DELETE_ON_ERROR:
 
-all: $(OUT)/INSTALL.EXE
+all: $(OUT)/INSTALL.EXE $(OUT)/gdicheck
+
+# INSTALL /CHECK for the host: build/gdicheck INSTALL.INI ...
+$(OUT)/gdicheck: src/check.c src/check.h | $(OUT)
+	$${HOSTCC:-cc} -std=c89 -O2 -Wall -DGDI_CHECK_MAIN -Isrc -o $@ src/check.c
 
 $(OUT):
 	mkdir -p $@

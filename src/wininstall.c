@@ -39,7 +39,9 @@ static int has_automatic;
 static int win9x;
 static int engine_running;
 static char source_sidecar[128];
-static int uninstall_mode;
+static int uninstall_mode;   /* 1 /U, 2 /M */
+extern char answer_file[80];   /* core.c: INSTALL /S[:file] */
+extern void (*gdi_removed_hook)( const char *dir );
 static char source_dir[128];
 static char module_path[128];
 static char engine_path[128];
@@ -619,6 +621,8 @@ static void apply_results( HWND window )
     char registry_error[180];
     char journal_path[128];
     int registry_failed = 0;
+    if ( uninstall_mode == 2 )
+        return;   /* INSTALL /M: removed_package() for each package */
     if ( uninstall_mode ) {
         path_cat( journal_path, source_dir, "REGISTRY.LOG" );
         /* WIN.INI values and groups, then the registry */
@@ -653,6 +657,19 @@ static void apply_results( HWND window )
     if ( registry_failed )
         MessageBox( window, registry_error, setup_title,
                     MB_OK | MB_ICONEXCLAMATION );
+}
+
+/* INSTALL /M: the Windows part of the removal of the package in dir */
+static void removed_package( const char *dir )
+{
+    char saved[128];
+    int mode = uninstall_mode;
+    strcpy( saved, source_dir );
+    sprintf( source_dir, "%.127s", dir );
+    uninstall_mode = 1;
+    apply_results( NULL );
+    uninstall_mode = mode;
+    strcpy( source_dir, saved );
 }
 
 static long FAR PASCAL window_proc( HWND window, UINT message,
@@ -767,6 +784,20 @@ int PASCAL WinMain( HINSTANCE instance, HINSTANCE previous,
             if ( ( *p == '/' || *p == '-' ) && toupper( p[1] ) == 'U' &&
                  ( !p[2] || p[2] == ' ' || p[2] == '\t' ) )
                 uninstall_mode = 1;
+            if ( ( *p == '/' || *p == '-' ) && toupper( p[1] ) == 'M' &&
+                 ( !p[2] || p[2] == ' ' || p[2] == '\t' ) )
+                uninstall_mode = 2;   /* the installed packages */
+            if ( ( *p == '/' || *p == '-' ) && toupper( p[1] ) == 'S' &&
+                 ( !p[2] || p[2] == ' ' || p[2] == '\t' || p[2] == ':' ) ) {
+                unsigned n = 0;
+                LPSTR q = p + 3;
+                if ( p[2] != ':' )
+                    answer_file[n++] = '*';
+                else
+                    while ( *q && *q != ' ' && *q != '\t' && n + 1 < sizeof(answer_file) )
+                        answer_file[n++] = *q++;
+                answer_file[n] = 0;
+            }
             while ( *p && *p != ' ' && *p != '\t' ) p++;
         }
     }
@@ -828,7 +859,14 @@ int PASCAL WinMain( HINSTANCE instance, HINSTANCE previous,
         return 2;
     }
 
-    if ( !needs_dos_engine() ) {
+    if ( answer_file[0] && needs_dos_engine() ) {
+        MessageBox( NULL, gdi_text( "SilentDos" ), setup_title,
+                    MB_OK | MB_ICONEXCLAMATION );
+        ini_free();
+        release_source_path();
+        return 2;
+    }
+    if ( uninstall_mode == 2 || !needs_dos_engine() ) {
         /* the installer core runs here; temp_paths() also names an engine
          * file, which is not written */
         int rc;
@@ -841,6 +879,8 @@ int PASCAL WinMain( HINSTANCE instance, HINSTANCE previous,
         }
         if ( uninstall_mode )
             registry_plan_path[0] = task_plan_path[0] = 0;
+        if ( uninstall_mode == 2 )
+            gdi_removed_hook = removed_package;
         atexit( native_cleanup );
         rc = gdi_native_run( instance, package_ini, source_dir, uninstall_mode,
                              win9x, registry_plan_path, task_plan_path );

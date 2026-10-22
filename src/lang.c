@@ -132,6 +132,40 @@ const char *gdi_text( const char *key )
 	return key;   /* not a key of language.ini: an error text itself */
 }
 
+/* the section of language.ini for an sLanguage= or a country code; -1 */
+int gdi_language_find( const char *slanguage, int country )
+{
+	char item[8];
+	int i;
+	for ( i = 0; i < GDI_LANGUAGES; i++ )
+		if ( listed( gdi_language[i][2], slanguage ) )
+			return i;
+	sprintf( item, "%d", country );
+	for ( i = 0; i < GDI_LANGUAGES; i++ )
+		if ( listed( gdi_language[i][1], item ) )
+			return i;
+	return -1;
+}
+
+/* the text key of section lang (-1: the installer's), in the DOS code page */
+void gdi_text_copy( int lang, const char *key, char *out, int size )
+{
+	int i;
+	if ( lang < 0 ) {
+		if ( language < 0 )
+			choose();
+		lang = language;
+	}
+	for ( i = 0; i < GDI_TEXTS; i++ )
+		if ( !_fstrcmp( (const char __far *)key, gdi_text_key[i] ) ) {
+			const char __far *t = gdi_text_of[lang][i] ? gdi_text_of[lang][i] : gdi_text_of[0][i];
+			_fstrncpy( (char __far *)out, t, size - 1 );
+			out[size - 1] = 0;
+			return;
+		}
+	sprintf( out, "%.*s", size - 1, key );
+}
+
 /* the frontend changes between ANSI and the DOS code page */
 void gdi_text_reset( void )
 {

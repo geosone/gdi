@@ -26,6 +26,10 @@ void find_windows( void )
 {
 	const char *path = getenv( "PATH" );
 	char p[80], dir[80];
+	if ( answer_win[0] ) {   /* INSTALL /S: [Answers] WinDir= */
+		strcpy( windir, answer_win );
+		return;
+	}
 	if ( path )
 		while ( *path ) {
 			int n = 0;
@@ -431,7 +435,7 @@ void ask_options( void )
 void ask_dirs( void )
 {
 	const char *value;
-	strcpy( dest, ini_get( "Setup", "DefaultDir", "C:\\PROGRAM" ) );
+	strcpy( dest, answer_dir[0] && !in_batch ? answer_dir : ini_get( "Setup", "DefaultDir", "C:\\PROGRAM" ) );
 	expand( dest, dest, sizeof(dest) );
 	if ( in_batch ) {   /* [Installer]: the default directory, no questions */
 		gdi_note_parents( dest, dest_top );
@@ -453,12 +457,109 @@ void ask_dirs( void )
 	}
 	find_dest();
 	if ( has_entry( "System.ini", "Add" ) || has_entry( "System.ini", "Set" ) ||
-		has_entry( "Win.ini", "Set" ) || has_progman() ||
+		has_entry( "System.ini", "Change" ) ||
+		has_entry( "Win.ini", "Set" ) || has_entry( "Ini", "Set" ) || has_progman() ||
 		ini_lines( "Registry", 0, &value ) >= 0 || hexpatch_needs_windows() ) {
 		find_windows();
 		if ( ui_input( T( "WinTitle" ),
 			T( "WinText" ), windir, 64 ) )
 			abort_setup();
+	}
+}
+
+/* --- before the files are copied: room, DOS and Windows version --------- */
+
+/* KB the files of the package take: [Setup] Space=, else the files next to
+ * INSTALL.EXE and twice the archive parts there (deflate: about half) */
+unsigned long package_space( void )
+{
+	const char *v, *t, *arc = ini_get( "Setup", "Archive", NULL );
+	char name[40], p[80];
+	struct find_t ff;
+	unsigned long bytes = 0;
+	int pos = 0, i;
+	if ( ( v = ini_get( "Setup", "Space", NULL ) ) != NULL )
+		return atol( v );
+	while ( ( pos = ini_lines( "Files", pos, &v ) ) >= 0 ) {
+		if ( !( t = cond( v ) ) )
+			continue;
+		sprintf( name, "%.*s", strchr( t, '=' ) ? (int)( strchr( t, '=' ) - t ) : 39, t );
+		path_cat( p, srcdir, name );
+		if ( !strchr( name, '*' ) && !_dos_findfirst( p, _A_NORMAL | _A_RDONLY | _A_HIDDEN | _A_SYSTEM, &ff ) )
+			bytes += ff.size;
+	}
+	for ( i = 1; arc && i < 100; i++ ) {
+		sprintf( name, "%.8s.D%02d", arc, i );
+		path_cat( p, srcdir, name );
+		if ( _dos_findfirst( p, _A_NORMAL | _A_RDONLY, &ff ) )
+			break;
+		bytes += 2 * ff.size;
+	}
+	return ( bytes + 1023 ) / 1024;
+}
+
+/* not enough room on drive for need KB: go on anyway or cancel */
+void check_space( char drive, unsigned long need )
+{
+	static const char *b[2];
+	static char text[200];
+	struct diskfree_t d;
+	unsigned long cluster, kb;
+	if ( !need || _dos_getdiskfree( toupper( (unsigned char)drive ) - 'A' + 1, &d ) )
+		return;
+	cluster = (unsigned long)d.sectors_per_cluster * d.bytes_per_sector;
+	kb = cluster >= 1024 ? d.avail_clusters * ( cluster / 1024 ) : d.avail_clusters * cluster / 1024;
+	if ( kb >= need )
+		return;
+	sprintf( text, T( "NoSpace" ), toupper( (unsigned char)drive ), kb, need );
+	b[0] = T( "Continue" );
+	b[1] = T( "Cancel" );
+	ui_clear();
+	if ( ui_message( T( "ErrorTitle" ), text, b, 2, 1, 1 ) ) {
+		ui_clear();
+		abort_setup();
+	}
+	ui_clear();
+}
+
+/* "6.22" or "3.1" as major * 100 + minor (3.1 = 3.10) */
+static unsigned version_number( const char *v )
+{
+	unsigned major = atoi( v ), minor = 0;
+	const char *dot = strchr( v, '.' );
+	if ( dot && isdigit( (unsigned char)dot[1] ) ) {
+		minor = ( dot[1] - '0' ) * 10;
+		if ( isdigit( (unsigned char)dot[2] ) )
+			minor += dot[2] - '0';
+	}
+	return major * 100 + minor;
+}
+
+/* [Setup] MinDos=, MinWindows= */
+void check_versions( void )
+{
+	const char *v;
+	char text[120], p[80];
+	union REGS r;
+	unsigned long ms, ls;
+	unsigned have;
+	if ( ( v = ini_get( "Setup", "MinDos", NULL ) ) != NULL ) {
+		r.x.ax = 0x3000;
+		intdos( &r, &r );
+		if ( r.h.al * 100u + r.h.ah < version_number( v ) ) {
+			sprintf( text, T( "NeedDosVersion" ), v );
+			fail( text );
+		}
+	}
+	if ( ( v = ini_get( "Setup", "MinWindows", NULL ) ) != NULL && windir[0] ) {
+		path_cat( p, windir, "SYSTEM\\USER.EXE" );
+		if ( !file_version( p, &ms, &ls ) ) {
+			have = (unsigned)( ms >> 16 ) * 100 + (unsigned)( ms & 0xFFFF );
+			if ( have < version_number( v ) ) {
+				sprintf( text, T( "NeedWinVersion" ), v );
+				fail( text );
+			}
+		}
 	}
 }
 
@@ -504,6 +605,13 @@ int confirm( void )
 				sprintf( text + strlen( text ), "SYSTEM.INI [%.*s]: %s\n", (int)( strchr( t, '|' ) - t ), t, line );
 			}
 		pos = 0;
+		while ( ( pos = ini_next( "System.ini", "Change", pos, &v ) ) >= 0 ) {
+			char sec[40], old[256], n[256];
+			if ( ( t = cond_new( "System.ini", "Change", v ) ) != NULL && !change_split( t, sec, old, n ) &&
+				strlen( text ) + strlen( old ) + strlen( n ) + 60 < sizeof(text) )
+				sprintf( text + strlen( text ), "SYSTEM.INI [%s]: %s -> %s\n", sec, old, n );
+		}
+		pos = 0;
 		while ( ( pos = ini_next( "System.ini", "Set", pos, &v ) ) >= 0 )
 			if ( ( t = cond_new( "System.ini", "Set", v ) ) != NULL && strchr( t, '|' ) ) {
 				expand( line, strchr( t, '|' ) + 1, sizeof(line) );
@@ -521,6 +629,19 @@ int confirm( void )
 					sprintf( text + strlen( text ), "WIN.INI [%.*s]: %s\n",
 						(int)( strchr( t, '|' ) - t ), t, line );
 			}
+		pos = 0;
+		while ( ( pos = ini_next( "Ini", "Set", pos, &v ) ) >= 0 ) {
+			char path[80];
+			const char *rest, *name;
+			if ( ( t = cond_new( "Ini", "Set", v ) ) != NULL && !ini_set_file( t, path, &rest ) &&
+				strchr( rest, '|' ) ) {
+				name = strrchr( path, '\\' ) ? strrchr( path, '\\' ) + 1 : path;
+				expand( line, strchr( rest, '|' ) + 1, sizeof(line) );
+				if ( strlen( text ) + strlen( line ) + strlen( name ) + 40 < sizeof(text) )
+					sprintf( text + strlen( text ), "%s [%.*s]: %s\n", name,
+						(int)( strchr( rest, '|' ) - rest ), rest, line );
+			}
+		}
 		pos = 0;
 		while ( ( pos = ini_next( "ProgMan", "Item", pos, &v ) ) >= 0 ) {
 			static char group[80], title[80], command[128], icon[128];

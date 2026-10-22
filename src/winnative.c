@@ -14,7 +14,7 @@
 
 extern HINSTANCE ui_instance;
 
-/* like the DOS engine started with /R /T /F (or /U /K): the registry, WIN.INI
+/* like the DOS engine started with /R /T /F (or /U /K, or /M): the registry, WIN.INI
  * and the groups are left in the plans for the frontend; returns 0, or
  * does not return (fail(), abort_setup()) */
 int gdi_native_run( HINSTANCE instance, const char *ini, const char *dir, int remove,
@@ -29,7 +29,9 @@ int gdi_native_run( HINSTANCE instance, const char *ini, const char *dir, int re
         return 2;
     sprintf( srcdir, "%.79s", dir );
     in_windows = 1;
-    uninstall = keep_uninstaller = remove;
+    /* remove: 1 INSTALL /U, 2 INSTALL /M */
+    uninstall = keep_uninstaller = remove == 1;
+    manage = remove == 2;
     if ( !remove ) {
         sprintf( registry_plan_file, "%.79s", registry_plan );
         sprintf( task_plan_file, "%.79s", task_plan );

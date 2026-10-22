@@ -93,6 +93,56 @@ static void winini_run( int add, const char *program )
 	ed_free();
 }
 
+/* the section of language.ini for the Windows in windir: [intl] of its
+ * WIN.INI (-1: the installer's language) */
+static int windows_language( void )
+{
+	static char seen[80];
+	static int lang = -1;
+	char p[80], l[120], slanguage[12];
+	FILE *f;
+	int in = 0, country = 0;
+	if ( !stricmp( seen, windir ) && *seen )
+		return lang;
+	strcpy( seen, windir );
+	*slanguage = 0;
+	path_cat( p, windir, "WIN.INI" );
+	if ( ( f = fopen( p, "r" ) ) != NULL ) {
+		while ( fgets( l, sizeof(l), f ) ) {
+			strip_eol( l );
+			if ( *l == '[' )
+				in = !strnicmp( l, "[intl]", 6 );
+			else if ( in && !strnicmp( l, "sLanguage=", 10 ) )
+				sprintf( slanguage, "%.9s", l + 10 );
+			else if ( in && !strnicmp( l, "iCountry=", 9 ) )
+				country = atoi( l + 9 );
+		}
+		fclose( f );
+	}
+	lang = *slanguage || country ? gdi_language_find( slanguage, country ) : -1;
+	return lang;
+}
+
+/* %MAIN%, %ACCESSORIES%, %GAMES%, %STARTUP%, %NETWORK%, %APPLICATIONS%: the
+ * group Windows Setup made, in the language of that Windows */
+static void group_name( char *group )
+{
+	static const char *const var[] = { "MAIN", "ACCESSORIES", "GAMES",
+		"STARTUP", "NETWORK", "APPLICATIONS" };
+	static const char *const key[] = { "GroupMain", "GroupAccessories", "GroupGames",
+		"GroupStartup", "GroupNetwork", "GroupApplications" };
+	int i, n;
+	if ( *group != '%' )
+		return;
+	for ( i = 0; i < 6; i++ ) {
+		n = strlen( var[i] );
+		if ( !strnicmp( group + 1, var[i], n ) && group[n + 1] == '%' && !group[n + 2] ) {
+			gdi_text_copy( windows_language(), key[i], group, 80 );
+			return;
+		}
+	}
+}
+
 /* [ProgMan] Item=cond|Group|Title|Command[|Icon file[|Icon index]]: fields
  * expanded and converted to ANSI; 1 = condition false, -1 = invalid */
 int progman_item( const char *value, char *group, char *title,
@@ -117,6 +167,7 @@ int progman_item( const char *value, char *group, char *title,
 	if ( !condition_true( trim_field( field[0] ) ) )
 		return 1;
 	sprintf( group, "%.79s", trim_field( field[1] ) );
+	group_name( group );
 	sprintf( title, "%.79s", trim_field( field[2] ) );
 	expand( command, trim_field( field[3] ), 128 );
 	if ( n > 4 && *trim_field( field[4] ) )

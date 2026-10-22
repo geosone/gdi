@@ -148,26 +148,39 @@ static int old_log_find( const char *path );
 /* update: an existing settings file stays ([Keep] cond|pattern; a pattern
  * without a path is a file name, else a path below %DIR% or a full path;
  * without [Keep]: *.INI and *.CFG).  Its log line is kept. */
-static int keep_file( const char *path )
+/* a line cond|pattern of section matches path (a pattern without a path is
+ * a file name, else a path below %DIR% or a full path); *any: the section
+ * has lines */
+static int section_match( const char *section, const char *path, int *any )
 {
 	const char *v, *t, *name = strrchr( path, '\\' );
 	char pat[80];
-	int pos = 0, n = strlen( dest ), any = 0, keep = 0, i;
+	int pos = 0, n = strlen( dest ), match = 0;
 	name = name ? name + 1 : path;
-	if ( !update_mode || !file_exists( path ) )
-		return 0;
-	while ( !keep && ( pos = ini_lines( "Keep", pos, &v ) ) >= 0 ) {
-		any = 1;
+	*any = 0;
+	while ( !match && ( pos = ini_lines( section, pos, &v ) ) >= 0 ) {
+		*any = 1;
 		if ( ( t = cond( v ) ) == NULL )
 			continue;
 		expand( pat, t, sizeof(pat) );
 		if ( pat[1] == ':' )
-			keep = wild_match( pat, path );
+			match = wild_match( pat, path );
 		else if ( strchr( pat, '\\' ) )
-			keep = !strnicmp( path, dest, n ) && path[n] == '\\' && wild_match( pat, path + n + 1 );
+			match = !strnicmp( path, dest, n ) && path[n] == '\\' && wild_match( pat, path + n + 1 );
 		else
-			keep = wild_match( pat, name );
+			match = wild_match( pat, name );
 	}
+	return match;
+}
+
+static int keep_file( const char *path )
+{
+	const char *name = strrchr( path, '\\' );
+	int any, keep, i;
+	name = name ? name + 1 : path;
+	if ( !update_mode || !file_exists( path ) )
+		return 0;
+	keep = section_match( "Keep", path, &any );
 	if ( !any )
 		keep = wild_match( "*.INI", name ) || wild_match( "*.CFG", name );
 	if ( keep && logf && ( i = old_log_find( path ) ) >= 0 ) {
@@ -250,6 +263,50 @@ static void log_file( const char *path )
 		fprintf( logf, "%s\n", path );
 }
 
+/* --- [Newer]: a file that is there already is replaced only by a newer
+ * version (VS_FIXEDFILEINFO of its version resource) -------------------- */
+
+/* the file version of a Windows program or DLL: 0 = found */
+int file_version( const char *path, unsigned long *ms, unsigned long *ls )
+{
+	static unsigned char buf[520];
+	FILE *f = fopen( path, "rb" );
+	int n, keep = 0, i;
+	if ( !f )
+		return -1;
+	/* the signature BD 04 EF FE, then the structure version, MS and LS */
+	while ( ( n = fread( buf + keep, 1, sizeof(buf) - keep, f ) ) > 0 ) {
+		n += keep;
+		for ( i = 0; i + 16 <= n; i++ )
+			if ( buf[i] == 0xBD && buf[i + 1] == 0x04 && buf[i + 2] == 0xEF && buf[i + 3] == 0xFE ) {
+				*ms = *(unsigned long *)( buf + i + 8 );
+				*ls = *(unsigned long *)( buf + i + 12 );
+				fclose( f );
+				return 0;
+			}
+		keep = n < 15 ? n : 15;
+		memmove( buf, buf + n - keep, keep );
+	}
+	fclose( f );
+	return -1;
+}
+
+/* [Newer] names path, the file is there and new is not newer: keep it */
+static int older_file( const char *new_file, const char *path )
+{
+	unsigned long nms, nls, oms, ols;
+	int any;
+	if ( !file_exists( path ) || !section_match( "Newer", path, &any ) ||
+		file_version( new_file, &nms, &nls ) || file_version( path, &oms, &ols ) )
+		return 0;
+	return nms < oms || ( nms == oms && nls <= ols );
+}
+
+/* archive files of [Newer] go to a temporary file first */
+#define MAXNEWER 40
+static char *newer_tmp[MAXNEWER], *newer_path[MAXNEWER];
+static int nnewer;
+
 /* [Files] line "cond|PATTERN=DEST": PATTERN is a name or "DIR\*" (all
  * archive files below DIR\, "*" = all); DEST is a name or directory,
  * relative to %DIR% unless it is a full path.  Returns 1 if name matches
@@ -307,6 +364,17 @@ static int arc_target( const char *name, char *path )
 			make_parent( path );
 			if ( keep_file( path ) )
 				return -1;
+			if ( file_exists( path ) && nnewer < MAXNEWER ) {
+				int any;
+				if ( section_match( "Newer", path, &any ) ) {
+					char tmp[80];
+					sprintf( tmp, "%s\\GDINEW.%03d", dest, nnewer );
+					newer_path[nnewer] = str_dup( path );
+					newer_tmp[nnewer++] = str_dup( tmp );
+					strcpy( path, tmp );
+					return 0;
+				}
+			}
 			log_file( path );
 			return 0;
 		}
@@ -361,7 +429,7 @@ void copy_all( void )
 		file_target( t, name, to );
 		make_parent( to );
 		ui_progress( progtitle, name, ++done, total );
-		if ( keep_file( to ) )
+		if ( keep_file( to ) || older_file( from, to ) )
 			continue;
 		log_file( to );
 		if ( copy_file( from, to ) ) {
@@ -411,6 +479,22 @@ void copy_all( void )
 				sprintf( msg, "%s", T( err ) );
 			fail( msg );
 		}
+		/* [Newer]: the newer one of each pair stays */
+		for ( i = 0; i < nnewer; i++ ) {
+			if ( !older_file( newer_tmp[i], newer_path[i] ) ) {
+				log_file( newer_path[i] );
+				remove( newer_path[i] );
+				if ( rename( newer_tmp[i], newer_path[i] ) && copy_file( newer_tmp[i], newer_path[i] ) ) {
+					char msg[160];
+					sprintf( msg, "%s %s", T( "CopyError" ), newer_path[i] );
+					fail( msg );
+				}
+			}
+			remove( newer_tmp[i] );
+			free( newer_tmp[i] );
+			free( newer_path[i] );
+		}
+		nnewer = 0;
 	}
 	old_log_flush();
 	if ( logf ) {
@@ -459,6 +543,111 @@ void edit_all( void )
 		if ( !frontend() && file_exists( p ) )
 			edit_file( p, "Win.ini", 3 );
 	}
+	ini_files();
+}
+
+/* --- a file replaced by a later package ----------------------------------
+ * Two packages that replace the same file: the later one keeps the earlier
+ * one's file as its backup.  Removing the earlier one first must not touch
+ * the file; it hands its own backup (the original) to the later one, or,
+ * when it created the file, tells it there is nothing to put back. */
+
+static int backup_number( const char *backup )
+{
+	int n = strlen( backup );
+	return n > 4 && backup[n - 4] == '.' && toupper( (unsigned char)backup[n - 3] ) == 'G' ?
+		atoi( backup + n - 2 ) : 0;
+}
+
+/* the package installed after this one that replaced path next: its
+ * INSTALL.LOG and backup; 0: none */
+static int later_owner( const char *path, const char *mine, char *log, char *theirs )
+{
+	FILE *g, *f;
+	char p[80], l[180], d[80], *e;
+	int in = 0, n = strlen( path ), my = *mine ? backup_number( mine ) : 0, best = 0, k;
+	sprintf( p, "%s\\GDI.INI", boot );
+	if ( !( g = fopen( p, "r" ) ) )
+		return 0;
+	while ( fgets( l, sizeof(l), g ) ) {
+		strip_eol( l );
+		if ( *l == '[' ) {
+			in = !strnicmp( l, "[Installed]", 11 );
+			continue;
+		}
+		if ( !in || !( e = strchr( l, '=' ) ) )
+			continue;
+		sprintf( d, "%.79s", e + 1 );
+		if ( ( e = strchr( d, '|' ) ) != NULL )
+			*e = 0;
+		if ( !stricmp( d, dest ) )
+			continue;
+		path_cat( p, d, "INSTALL.LOG" );
+		if ( !( f = fopen( p, "r" ) ) )
+			continue;
+		while ( fgets( l, sizeof(l), f ) ) {
+			strip_eol( l );
+			if ( strnicmp( l, path, n ) || l[n] != '|' )
+				continue;
+			k = backup_number( l + n + 1 );
+			if ( k > my && ( !best || k < best ) ) {
+				best = k;
+				strcpy( log, p );
+				sprintf( theirs, "%.79s", l + n + 1 );
+			}
+			break;
+		}
+		fclose( f );
+	}
+	fclose( g );
+	return best != 0;
+}
+
+/* the line "path|backup" of another INSTALL.LOG becomes "path" (in
+ * old_log, unused while a package is removed) */
+static void log_drop_backup( const char *log, const char *path )
+{
+	char __far **lines = old_log;
+	char l[180];
+	FILE *f = fopen( log, "r" );
+	int n = 0, i, k = strlen( path );
+	if ( !f )
+		return;
+	while ( n < MAXOLD && fgets( l, sizeof(l), f ) ) {
+		strip_eol( l );
+		if ( !strnicmp( l, path, k ) && l[k] == '|' )
+			l[k] = 0;
+		if ( ( lines[n] = _fmalloc( strlen( l ) + 1 ) ) != NULL )
+			_fstrcpy( lines[n++], l );
+	}
+	fclose( f );
+	if ( ( f = fopen( log, "w" ) ) != NULL ) {
+		for ( i = 0; i < n; i++ )
+			fprintf( f, "%Fs\n", lines[i] );
+		fclose( f );
+	}
+	while ( n )
+		_ffree( lines[--n] );
+}
+
+/* path (with this package's backup, or "") was replaced again by a later
+ * package: hand it over; 1: the file stays */
+static int hand_over_file( const char *path, const char *mine )
+{
+	char log[80], theirs[80];
+	if ( !later_owner( path, mine, log, theirs ) )
+		return 0;
+	if ( *mine && file_exists( mine ) ) {
+		/* its backup (our file) is replaced by ours (the original) */
+		remove( theirs );
+		if ( rename( mine, theirs ) && !copy_file( mine, theirs ) )
+			remove( mine );
+	} else {
+		/* we created the file: the later package removes it */
+		remove( theirs );
+		log_drop_backup( log, path );
+	}
+	return 1;
 }
 
 void remove_all( void )
@@ -469,8 +658,10 @@ void remove_all( void )
 	static const char *b[2];
 	b[0] = T( "Remove" );
 	b[1] = T( "Cancel" );
-	if ( ui_message( T( "UninstTitle" ), T( "UninstText" ), b, 2, 1, 0 ) != 0 )
+	if ( !in_batch && ui_message( T( "UninstTitle" ), T( "UninstText" ), b, 2, 1, 0 ) != 0 ) {
+		ui_clear();
 		abort_setup();
+	}
 	strcpy( dest, srcdir );
 	for ( pos = 0; pos < MAXOPT; pos++ )
 		opt_on[pos] = 1;
@@ -490,6 +681,8 @@ void remove_all( void )
 			strip_eol( l );
 			if ( ( e = strchr( l, '|' ) ) != NULL ) {
 				*e++ = 0;
+				if ( hand_over_file( l, e ) )
+					continue;
 				if ( file_exists( e ) ) {
 					remove( l );
 					if ( rename( e, l ) && !copy_file( e, l ) )
@@ -500,6 +693,8 @@ void remove_all( void )
 			runner_path( p );
 			if ( pending && !stricmp( l, p ) )
 				continue;   /* runs at the next start of Windows */
+			if ( hand_over_file( l, "" ) )
+				continue;
 			remove( l );
 			while ( ( b = strrchr( l, '\\' ) ) != NULL && b - l > 2 && stricmp( l, dest ) ) {
 				*b = 0;

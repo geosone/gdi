@@ -127,8 +127,12 @@ void install_steps( void )
 			fail( registry_error );
 	}
 	task_write_plan();   /* an update: only the new Program Manager items */
-	if ( !in_batch && !confirm() )
-		abort_setup();
+	if ( !in_batch ) {
+		check_versions();
+		check_space( dest[0], package_space() );
+		if ( !confirm() )
+			abort_setup();
+	}
 	ui_clear();
 	run_all( "Before" );
 	copy_all();
@@ -221,9 +225,43 @@ void extras( void )
 
 /* the whole setup of the loaded INI (srcdir, the options of the command
  * line set); returns 0, fail() and abort_setup() do not return */
+/* INSTALL /S[:file]: no questions; [Answers] Dir= and Options= of the file
+ * replace DefaultDir= and the default options */
+void answers_load( void )
+{
+	static char options[MAXOPT + 2];
+	char l[120], *e;
+	FILE *f;
+	int in = 0;
+	ui_unattended = 1;
+	if ( !answer_file[0] || answer_file[0] == '*' || !( f = fopen( answer_file, "r" ) ) )
+		return;
+	while ( fgets( l, sizeof(l), f ) ) {
+		strip_eol( l );
+		if ( *l == '[' ) {
+			in = !strnicmp( l, "[Answers]", 9 );
+			continue;
+		}
+		if ( !in || !( e = strchr( l, '=' ) ) )
+			continue;
+		*e++ = 0;
+		if ( !stricmp( l, "Dir" ) )
+			sprintf( answer_dir, "%.79s", e );
+		else if ( !stricmp( l, "Options" ) ) {
+			sprintf( options, "%.*s", MAXOPT, e );
+			option_override = options;
+		} else if ( !stricmp( l, "WinDir" ) )
+			sprintf( answer_win, "%.79s", e );
+	}
+	fclose( f );
+}
+
 int core_run( void )
 {
 	union REGS r;
+
+	if ( answer_file[0] )
+		answers_load();
 
 	dosmode = !stricmp( ini_get( "Setup", "Mode", "" ), "DOS" );
 	if ( dosmode && !bootset ) {
@@ -244,6 +282,12 @@ int core_run( void )
 	ui_title( ini_get( "Setup", "Title", "Setup" ), ini_get( "Setup", "Product", "GeosOne Dual Installer" ) );
 	ui_clear();
 	read_options();
+	if ( manage ) {
+		manage_installed();
+		completion_status = 0;
+		ui_exit();
+		return 0;
+	}
 	if ( !stricmp( ini_get( "Setup", "Windows", "yes" ), "no" ) && windows_running() )
 		fail( T( "NeedDos" ) );
 	if ( uninstall )

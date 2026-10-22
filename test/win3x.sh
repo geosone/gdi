@@ -9,7 +9,8 @@
 # disk cache and WIN.INI only then); at the end the registry must contain the
 # package entries ([Registry] Set= and Import=) and be as before after /U.
 # FRONTEND=1 installs and removes from Windows (ENGINE=1: through the DOS
-# engine), UPDATE=1 updates.
+# engine; SILENT=1: INSTALL /S; MANAGE=1: removed by INSTALL /M), UPDATE=1
+# updates.
 # Environment: WIN311IMG (a hard disk image with Windows 3.1x in C:\WINDOWS,
 # FAT partition at sector 63, AUTOEXEC.BAT is replaced), TIMEOUT
 set -uo pipefail
@@ -67,7 +68,7 @@ run() {
 }
 fetch() {
     d="$OUT/files/$1"; mkdir -p "$d"
-    for f in WINDOWS/WIN.INI WINDOWS/SYSTEM.INI WINDOWS/PROGMAN.INI WINDOWS/REPL.TXT WINDOWS/REG.DAT; do mcopy -o -i "$P" "::/$f" "$d/" 2>/dev/null; done
+    for f in WINDOWS/WIN.INI WINDOWS/SYSTEM.INI WINDOWS/CONTROL.INI WINDOWS/PROGMAN.INI WINDOWS/REPL.TXT WINDOWS/REG.DAT; do mcopy -o -i "$P" "::/$f" "$d/" 2>/dev/null; done
     mcopy -o -i "$P" "::/WINDOWS/*.GRP" "$d/" 2>/dev/null
     mcopy -o -s -i "$P" "::/PMTEST" "$d/" 2>/dev/null
 }
@@ -110,9 +111,12 @@ elif [ -n "${FRONTEND:-}" ]; then
     else
         KEYS_IN="ret ret ret ret ret ret" KEYS_UN="$R ret"
     fi
-    TIMEOUT=${TIMEOUT:-80} run "$W C:\SRC\INSTALL.EXE" install "$KEYS_IN"
+    A_IN='' A_UN='C:\PMTEST\INSTALL.EXE /U'
+    [ -n "${SILENT:-}" ] && A_IN=' /S' KEYS_IN=''
+    [ -n "${MANAGE:-}" ] && A_UN='C:\SRC\INSTALL.EXE /M' KEYS_UN="spc ret $R ret"
+    TIMEOUT=${TIMEOUT:-80} run "$W C:\SRC\INSTALL.EXE$A_IN" install "$KEYS_IN"
     fetch 1-installed
-    TIMEOUT=${TIMEOUT:-80} run "$W C:\PMTEST\INSTALL.EXE /U" uninst "$KEYS_UN"
+    TIMEOUT=${TIMEOUT:-80} run "$W $A_UN" uninst "$KEYS_UN"
     fetch 2-removed
     INSTALLED=1-installed REMOVED=2-removed
 else
@@ -144,5 +148,10 @@ if [ -z "${UPDATE:-}" ]; then
     # -B: Windows writes a blank line before a new section and keeps it
     # when the profile functions remove the section again
     diff -B <(tr -d '\r' < 0-before/WIN.INI) <(tr -d '\r' < "$REMOVED/WIN.INI") || { echo "WIN.INI not restored"; exit 1; }
-    echo "Windows registry and WIN.INI integration passed"
+    # %ACCESSORIES%: the item is in the accessories group of the German Windows
+    grep -aq 'GDI Test' "$INSTALLED"/ZUBEH*.GRP || { echo "%ACCESSORIES% item missing"; exit 1; }
+    # [Ini] Set=: CONTROL.INI
+    grep -qx 'Value=installed' <(tr -d '\r' < "$INSTALLED/CONTROL.INI") || { echo "CONTROL.INI value missing"; exit 1; }
+    diff -B <(tr -d '\r' < 0-before/CONTROL.INI) <(tr -d '\r' < "$REMOVED/CONTROL.INI") || { echo "CONTROL.INI not restored"; exit 1; }
+    echo "Windows registry, WIN.INI and CONTROL.INI integration passed"
 fi

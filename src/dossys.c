@@ -128,3 +128,8 @@ void dos_prepare( void )
 		}
 	}
 }
+
+void profile_flush( const char *path )
+{
+	(void)path;
+}

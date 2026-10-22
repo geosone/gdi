@@ -93,10 +93,11 @@ Accept=Akzeptieren
 | `[Languages]` | an application language choice | this chapter |
 | `[Text]` | translations of the installer texts | this chapter |
 | `[Config.sys]`, `[Autoexec.bat]` | DOS configuration | [System files](system-files.md) |
-| `[System.ini]`, `[Win.ini]`, `[ProgMan]` | Windows 3.x configuration | [System files](system-files.md) |
+| `[System.ini]`, `[Win.ini]`, `[Ini]`, `[ProgMan]` | Windows 3.x configuration, any INI file | [System files](system-files.md) |
 | `[HexPatch]` | checked binary patches | [Binary patches](binary-patches.md) |
 | `[Registry]` | Windows registry entries | [Registry](registry.md) |
 | `[Keep]` | settings files an update keeps | [Uninstall and updates](uninstall-update.md) |
+| `[Newer]` | shared files replaced only by a newer version | [Uninstall and updates](uninstall-update.md) |
 | `[Installer]` | several packages in one setup | [Combined setup](combined-setup.md) |
 | `[Disks]`, `Archive=`, `Mode=DOS` | disk sets, installing DOS | [Disks and DOS mode](disks-dos-mode.md) |
 
@@ -117,8 +118,16 @@ Accept=Akzeptieren
 | `Uninstall=` | `yes` (default): copy `INSTALL.EXE`/`INSTALL.INI` to the target for `INSTALL /U` |
 | `Texts=` | the section of `src/language.ini` for the texts (default: the language of the system) |
 | `Windows=` | `no`: refuse to run under Windows (text `[Text] NeedDos`), for packages that replace files Windows has open |
+| `Space=` | KB the installation needs (default: the files next to `INSTALL.EXE`, archives twice) |
+| `MinDos=` | the DOS version needed, e.g. `5.0` |
+| `MinWindows=` | the Windows version needed, e.g. `3.1` (the version of `USER.EXE` in `%WINDIR%\SYSTEM`) |
 | `Archive=` | take the files from a GDA archive |
 | `Mode=`, `Drive=`, `Fdisk=`, `Format=`, `Extras=`, `ExtrasDir=` | DOS mode |
+
+Before the summary, Setup checks the free space of the target drive (a
+warning; the installation can go on) and `MinDos=`/`MinWindows=` (an
+error). For an `[Installer]` file the space of all chosen packages is added
+up per drive.
 
 ## Licenses
 
@@ -246,3 +255,37 @@ texts for a package, with the keys of `src/language.ini`, for example
 `WelcomeTitle`, `LicenseTitle`, `Accept`, `Decline`, `DirTitle`, `DirText`,
 `OptionsTitle`, `SumTitle`, `Install`, `Cancel`, `DoneTitle`, `DoneText`,
 `KeysMsg`, `NeedDos`; `\n` is a new line.
+
+## Without questions: INSTALL /S
+
+`INSTALL /S` installs with the defaults: the licenses are accepted, the
+options, the target directory and the Windows directory are those Setup
+proposes, and each message takes its default button (so a missing required
+package or a full disk cancels). `INSTALL /S:ANSWERS.INI` takes the answers
+from a file:
+
+```ini
+[Answers]
+Dir=D:\TOOLS\AHCIASPI   ; instead of DefaultDir=
+Options=1011            ; as /O: (1 on, 0 off, other: the default)
+WinDir=D:\WIN31
+```
+
+Under Windows, `/S` works for packages the frontend installs itself; one
+that needs the DOS engine (`Mode=DOS`, `[Detect]`, `[Run] Before=`/`After=`)
+is refused with a message.
+
+## Checking a package: INSTALL /CHECK
+
+`INSTALL /CHECK [file.INI]` (and `build/gdicheck file.INI ...` on the build
+host, built by `make`) reports what Setup would only notice at the user's:
+
+- unknown sections and keys (`Titel=` in `[Setup]`),
+- lines longer than 510 characters, more than 400 lines,
+- files of `[Files]`, `Readme=`, the licenses, `[Detect]`, `[Installer]` and
+  `[Registry] Import=` that are not next to the INI (case does not matter;
+  `[Files]` is not checked with `Archive=` or `[Disks]`),
+- conditions with a name not in `[Find]` or `[Detect]` (`?CDX` for `?CDEX`)
+  or an option number that does not exist.
+
+The exit code is 0 without problems and 1 otherwise, so a build can stop.

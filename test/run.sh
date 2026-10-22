@@ -8,6 +8,16 @@
 #                       (all files of dir, its INSTALL.INI) into A:\NAME
 #   PKG=test/combined ONEEXE=1 TARGET=PKGA KEYS=... test/run.sh   [Installer]
 #   PKG=test/depends ONEEXE=1 DEPENDS=1 test/run.sh   Requires=, Conflicts=
+#   INI=test/TESTINI.INI WINDOWS=1 INIFILES=1 TARGET=TESTINI KEYS="ret ret ret ret ret"
+#       [UNINST=1] test/run.sh   [Ini], [System.ini] Change=
+#   PKG=test/newer TARGET=NEWTEST NEWER=1 KEYS="ret ret ret ret" [UNINST=1] test/run.sh
+#                       [Newer]
+#   PKG=test/owner ONEEXE=1 OWNER=1 KEYS=... test/run.sh   a file replaced by
+#                       two packages, the first one removed first
+#   SILENT=1 TARGET=SILENT test/run.sh   INSTALL /S:answers, no keys
+#   PKG=test/depends ONEEXE=1 MANAGE=1 TARGET=PKGA TIMEOUT=15 KEYS=... test/run.sh
+#                       then INSTALL /M removes both packages
+#   CHECK=1 test/run.sh   INSTALL /CHECK of test/TEST.INI
 # Environment: BOOTIMG (DOS boot floppy), INI, KEYS, TIMEOUT
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -19,6 +29,7 @@ cp "$BOOTIMG" "$OUT/boot.img"; chmod u+w "$OUT/boot.img"
 crlf() { sed 's/$/\r/'; }
 TARGET=${TARGET:-TESTDRV}
 ARGS=${ARGS:-}
+[ -n "${SILENT:-}" ] && ARGS="/S:A:\SRC\ANS.INI $ARGS"
 if [ -n "${PKG:-}" ]; then
     cp -r "$PKG"/* "$OUT/src/"
     # the installer next to every INSTALL.INI of the distribution
@@ -40,6 +51,7 @@ else
     printf '[Language]\r\nSelected=en\r\n[Keep]\r\nValue=preserved\r\n' > "$OUT/src/SETTINGS.INI"
     printf 'TESTVXD test VxD\r\n' > "$OUT/src/TESTVXD.386"
 fi
+[ -n "${SILENT:-}" ] && printf '[Answers]\r\nDir=A:\\SILENT\r\n' > "$OUT/src/ANS.INI"
 printf 'org 100h\nmov dx,501h\nout dx,al\nint 20h\n' > "$OUT/qexit.asm" && nasm -f bin -o "$OUT/src/QEXIT.COM" "$OUT/qexit.asm"
 if [ -n "${MENU:-}" ]; then   # multi-config CONFIG.SYS
     { echo '[menu]'; echo 'menuitem=STD,Standard'; echo 'menudefault=STD,0'; echo '[STD]'; echo 'DEVICE=A:\HIMEM.SYS'; echo '[common]'; echo 'FILES=30'; } | crlf > "$OUT/CONFIG.SYS"
@@ -49,8 +61,20 @@ fi
 # the steps run in RUN.BAT: INSTALL changes AUTOEXEC.BAT while it runs
 {
     echo '@ECHO OFF'
-    echo "A:\\SRC\\INSTALL.EXE $ARGS"
+    if [ -n "${CHECK:-}" ]; then
+        echo 'A:\SRC\INSTALL.EXE /CHECK > AUX'
+    else
+        echo "A:\\SRC\\INSTALL.EXE $ARGS"
+    fi
+    [ -n "${MANAGE:-}" ] && echo 'A:\SRC\INSTALL.EXE /M'
+    [ -n "${MANAGE:-}" ] && { echo 'ECHO === GDI.INI > AUX'; echo 'TYPE A:\GDI.INI > AUX'; }
     [ -n "${UNINST:-}" ] && echo "A:\\$TARGET\\INSTALL.EXE /U"
+    if [ -n "${OWNER:-}" ]; then   # remove X first, then Y
+        echo 'A:\SRC\INSTALL.EXE /U A:\PKGX\INSTALL.INI'
+        echo 'ECHO === AFTER X > AUX'; echo 'TYPE A:\SHARED.TXT > AUX'; echo 'TYPE A:\NEW.TXT > AUX'
+        echo 'A:\SRC\INSTALL.EXE /U A:\PKGY\INSTALL.INI'
+        echo 'ECHO === AFTER Y > AUX'; echo 'TYPE A:\SHARED.TXT > AUX'; echo 'DIR /B A:\NEW.* A:\SHARED.* > AUX'
+    fi
     echo 'ECHO === CONFIG.SYS > AUX'; echo 'TYPE A:\CONFIG.SYS > AUX'
     echo 'ECHO === AUTOEXEC.BAT > AUX'; echo 'TYPE A:\AUTOEXEC.BAT > AUX'
     echo 'ECHO === TARGET > AUX'; echo "DIR A:\\$TARGET > AUX"
@@ -61,6 +85,10 @@ fi
 P="$OUT/boot.img"
 mmd -i "$P" ::/SRC 2>/dev/null
 mcopy -s -o -i "$P" "$OUT"/src/* ::/SRC/ && mcopy -o -i "$P" "$OUT/CONFIG.SYS" "$OUT/AUTOEXEC.BAT" ::/ || exit 1
+if [ -n "${NEWER:-}" ]; then   # version 2.0 of each DLL is there already
+    for f in KEEP TAKE ARCKEEP ARCTAKE; do mcopy -o -i "$P" "$ROOT/test/newer/OLD2.DLL" "::/$f.DLL"; done
+fi
+[ -n "${OWNER:-}" ] && { printf 'original\r\n' > "$OUT/SHARED.TXT"; mcopy -o -i "$P" "$OUT/SHARED.TXT" ::/; }
 if [ -n "${WINDOWS:-}" ]; then   # a fake Windows directory with SYSTEM.INI
     mmd -i "$P" ::/WINDOWS
     printf '\xcd\x20' > "$OUT/WIN.COM"
@@ -68,6 +96,10 @@ if [ -n "${WINDOWS:-}" ]; then   # a fake Windows directory with SYSTEM.INI
     mcopy -o -i "$P" "$OUT/WIN.COM" "$OUT/SYSTEM.INI" ::/WINDOWS/
     sed -i 's/^A:\\SRC\\QEXIT/ECHO === SYSTEM.INI > AUX\r\nTYPE A:\\WINDOWS\\SYSTEM.INI > AUX\r\nA:\\SRC\\QEXIT/' "$OUT/src/RUN.BAT"
     mcopy -o -i "$P" "$OUT/src/RUN.BAT" ::/SRC/
+fi
+if [ -n "${INIFILES:-}" ]; then   # CONTROL.INI for [Ini] Set=
+    printf '[MMCPL]\r\nold=1\r\nkframe=old\r\n\r\n[other]\r\nx=1\r\n' > "$OUT/CONTROL.INI"
+    mcopy -o -i "$P" "$OUT/CONTROL.INI" ::/WINDOWS/
 fi
 if [ -n "${HEXPATCH:-}" ]; then
     mmd -i "$P" ::/WINDOWS/SYSTEM
@@ -77,6 +109,7 @@ if [ -n "${HEXPATCH:-}" ]; then
 fi
 DEFAULT_KEYS="ret ret ret ret ret ret ret ret ret"
 [ -n "${UNINST:-}" ] && DEFAULT_KEYS="ret ret ret ret ret ret"
+[ -n "${SILENT:-}${CHECK:-}" ] && DEFAULT_KEYS="shift"   # no questions
 KEYS=${KEYS:-$DEFAULT_KEYS}
 [ -n "${UNINST:-}" ] && KEYS="$KEYS ${UNKEYS:-r}"
 {
@@ -99,6 +132,52 @@ if [ -n "${DEPENDS:-}" ]; then
     python3 -c 'import sys; k=[l.split("=")[0] for l in open(sys.argv[1]).read().splitlines() if "=" in l]; assert k == ["GDI-B", "Package A"], k' "$OUT/GDI.INI" || exit 1
     ! mdir -i "$P" ::/PKGC >/dev/null 2>&1 || exit 1
     echo "DOS Requires/Conflicts integration passed"
+fi
+if [ -n "${MANAGE:-}" ]; then
+    # INSTALL /M, both checked: GDI.INI empty, the directories gone
+    tr -d '\r' < "$OUT/serial.log" | sed -n '/=== GDI.INI/,/=== CONFIG.SYS/p' | grep -v '^===' | grep -q '=' && { echo "GDI.INI not empty"; exit 1; }
+    for d in PKGA PKGB; do mdir -i "$P" ::/$d >/dev/null 2>&1 && { echo "$d left"; exit 1; }; done
+    echo "DOS INSTALL /M integration passed"
+fi
+if [ -n "${SILENT:-}" ]; then
+    mcopy -o -i "$P" ::/SILENT/TESTDRV.SYS "$OUT/SILENT.SYS" || exit 1
+    tr -d '\r' < "$OUT/serial.log" | sed -n '/=== CONFIG.SYS/,/=== AUTOEXEC/p' | grep -qi 'SILENT\\TESTDRV.SYS' || exit 1
+    echo "DOS INSTALL /S integration passed"
+fi
+if [ -n "${CHECK:-}" ]; then
+    tr -d '\r' < "$OUT/serial.log" | grep -qx 'no problems' || exit 1
+    echo "DOS INSTALL /CHECK integration passed"
+fi
+if [ -n "${INIFILES:-}" ]; then
+    mcopy -o -i "$P" ::/WINDOWS/CONTROL.INI "$OUT/CONTROL-AFTER.INI"
+    mcopy -o -i "$P" ::/WINDOWS/SYSTEM.INI "$OUT/SYSTEM-AFTER.INI"
+    if [ -n "${UNINST:-}" ]; then
+        cmp "$OUT/CONTROL.INI" "$OUT/CONTROL-AFTER.INI" || exit 1
+        cmp "$OUT/SYSTEM.INI" "$OUT/SYSTEM-AFTER.INI" || exit 1   # Change= undone
+        ! mdir -i "$P" ::/APP.INI >/dev/null 2>&1 || exit 1
+    else
+        mcopy -o -i "$P" ::/APP.INI "$OUT/APP.INI" || exit 1
+        tr -d '\r' < "$OUT/SYSTEM-AFTER.INI" | grep -qx 'device=A:\\TESTINI\\VPICDA.386' || exit 1
+        ! tr -d '\r' < "$OUT/SYSTEM-AFTER.INI" | grep -qx 'device=\*vpicd' || exit 1
+        python3 -c 'import configparser,sys; c=configparser.ConfigParser(); c.read(sys.argv[1]); assert c["MMCPL"]["kframe"].upper() == "A:\\TESTINI\\KFRAME.CPL"; assert c["MMCPL"]["old"] == "1"; assert c["drivers.desc"]["test.drv"] == "Test driver"; a=configparser.ConfigParser(); a.read(sys.argv[2]); assert a["Options"]["Mode"] == "2"' "$OUT/CONTROL-AFTER.INI" "$OUT/APP.INI" || exit 1
+    fi
+    echo "DOS [Ini] Set integration passed"
+fi
+if [ -n "${NEWER:-}" ]; then
+    # 1.0 does not replace 2.0, 3.0 does; INSTALL /U puts 2.0 back
+    for f in KEEP TAKE ARCKEEP ARCTAKE; do mcopy -o -i "$P" "::/$f.DLL" "$OUT/$f.DLL"; done
+    want3=3; [ -n "${UNINST:-}" ] && want3=2
+    for f in KEEP ARCKEEP; do grep -q 'version 2\.0' "$OUT/$f.DLL" || { echo "$f.DLL replaced"; exit 1; }; done
+    for f in TAKE ARCTAKE; do grep -q "version $want3\\.0" "$OUT/$f.DLL" || { echo "$f.DLL: not version $want3"; exit 1; }; done
+    ! mdir -b -i "$P" ::/NEWTEST 2>/dev/null | grep -i GDINEW || exit 1
+    echo "DOS [Newer] integration passed"
+fi
+if [ -n "${OWNER:-}" ]; then
+    # X removed first: Y's files stay; Y removed: the original is back
+    tr -d '\r' < "$OUT/serial.log" | sed -n '/=== AFTER X/,/=== CONFIG.SYS/p' > "$OUT/owner.txt"
+    python3 -c 'import sys; t=open(sys.argv[1]).read().split("=== AFTER Y"); assert "shared from Y" in t[0] and "new from Y" in t[0], t; assert "original" in t[1], t' "$OUT/owner.txt" || exit 1
+    ! mdir -b -i "$P" ::/ | grep -i 'NEW\.TXT\|\.G0[0-9]' || exit 1
+    echo "DOS shared file hand-over integration passed"
 fi
 if [ -n "${SYSTEMSET:-}" ]; then
     mcopy -o -i "$P" ::/WINDOWS/SYSTEM.INI "$OUT/SYSTEM-AFTER.INI"

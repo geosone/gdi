@@ -9,7 +9,8 @@ order:
 
 1. the binary patches (checked reverse transformation),
 2. the `Remove=` lines and `Extend=` texts of `CONFIG.SYS` and
-   `AUTOEXEC.BAT`, the lines and values of `SYSTEM.INI` and `WIN.INI`,
+   `AUTOEXEC.BAT`, the lines and values of `SYSTEM.INI`, `WIN.INI` and the
+   other INI files,
 3. the Program Manager items and the groups Setup created,
 4. the registry (from its journal, see [Registry](registry.md)),
 5. the files listed in `INSTALL.LOG`, the target directory and the empty
@@ -25,7 +26,9 @@ All of them are in the target directory (`%DIR%`):
 | `INSTALL.LOG` | the installed files; `path|backup` for a replaced file |
 | `DIRS.LOG` | the first parent directory Setup created for `%DIR%` |
 | `SYSTEM.ADD` | the lines added to `SYSTEM.INI` |
+| `SYSTEM.CHG` | the lines of `SYSTEM.INI` replaced (`Change=`) |
 | `SYSTEM.SET`, `WIN.SET` | the previous lines of the values set in `SYSTEM.INI`, `WIN.INI` |
+| `INI.SET` | the file, section, key and previous line of the values set by `[Ini]` |
 | `PROGMAN.LOG` | the created groups (`G|group`) and added items (`I|group|title`) |
 | `REGISTRY.LOG` | the previous state of every registry key and value changed |
 | `REGISTRY.PLN`, `UNINST.PND` | registry work left for the next Windows start |
@@ -51,6 +54,42 @@ replaces an existing one outside `%DIR%` (for example
 `REPL.TXT=%WINDIR%\REPL.TXT`) is kept the same way; `INSTALL.LOG` records
 `path|backup`, and `INSTALL /U` puts the original back. A second installation
 keeps the first backup.
+
+When two packages replace the same file, the later one keeps the earlier
+one's file as its backup. If the earlier package is removed first, the file
+stays as the later package left it, and the earlier package hands its backup
+(the original) over to the later one; when it had created the file, the later
+package removes it at its own removal. Whatever the order of removal, the
+original comes back in the end.
+
+## All installed packages: INSTALL /M
+
+`INSTALL /M` lists the packages in `GDI.INI` `[Installed]` with name,
+version and directory; those checked are removed one after the other, the
+last installed first, each as with `INSTALL /U` from its directory. It works
+in plain DOS and under Windows (a package with `Windows=no` only in DOS; the
+list says so). Any `INSTALL.EXE` that knows `/M` can be used, for
+instance the one of a package's directory.
+
+## Shared DLLs: [Newer]
+
+A file that several programs use (`CTL3D.DLL`, `VBRUN300.DLL`, the MFC
+DLLs) should not replace a newer version that is there already:
+
+```ini
+[Newer]
+*.DLL
+1|%WINDIR%\SYSTEM\CTL3D*.DLL
+```
+
+The lines of `[Newer]` are patterns as in `[Keep]` (a file name, a path
+below `%DIR%`, or a full path; optionally with a condition). A file they
+name that exists already is replaced only when the new one has a higher file
+version (the `VS_FIXEDFILEINFO` of its version resource); otherwise the
+installed file stays and is not part of the installation (`INSTALL /U`
+leaves it). When one of the two files has no version resource, the file is
+replaced as usual. Files from an archive are unpacked to a temporary file in
+`%DIR%` first and compared afterwards.
 
 ## Updates
 

@@ -435,6 +435,78 @@ static int ed_unadd_ini( void )
 	return 1;
 }
 
+/* SYSTEM.INI: Change=cond|Section|old line|new line replaces a line (for a
+ * line that may be there more than once, device=*vtd for example).  The
+ * lines replaced are kept in %DIR%\SYSTEM.CHG ("section|old|new"), and
+ * INSTALL /U puts the old line back while the new one is still there. */
+int change_split( const char *text, char *sec, char *old, char *line )
+{
+	const char *a = strchr( text, '|' ), *b = a ? strchr( a + 1, '|' ) : NULL;
+	char raw[256];
+	if ( !b || a == text || a - text > 39 || b - a - 1 < 1 || b - a - 1 > 255 || !b[1] )
+		return -1;
+	sprintf( sec, "%.*s", (int)( a - text ), text );
+	sprintf( raw, "%.*s", (int)( b - a - 1 ), a + 1 );
+	expand( old, raw, 256 );
+	expand( line, b + 1, 256 );
+	return 0;
+}
+
+static void ed_change_ini( void )
+{
+	const char *v, *t;
+	char sec[40], old[256], line[256], hdr[44], journal[80];
+	int pos = 0, i;
+	FILE *f = NULL;
+	path_cat( journal, dest, "SYSTEM.CHG" );
+	while ( ( pos = ini_next( "System.ini", "Change", pos, &v ) ) >= 0 ) {
+		if ( !( t = cond_new( "System.ini", "Change", v ) ) )
+			continue;
+		if ( change_split( t, sec, old, line ) )
+			fail( T( "ChangeDefinition" ) );
+		sprintf( hdr, "[%s]", sec );
+		if ( ( i = ini_find_line( hdr, old ) ) < 0 )
+			continue;   /* not there (or changed already) */
+		if ( !f && !( f = fopen( journal, "a" ) ) ) {
+			char msg[120];
+			sprintf( msg, "%s %s", T( "WriteError" ), journal );
+			fail( msg );
+		}
+		fprintf( f, "%s|%s|%s\n", sec, old, line );
+		free( ed[i] );
+		ed[i] = str_dup( line );
+	}
+	if ( f )
+		fclose( f );
+}
+
+/* INSTALL /U: the old lines of SYSTEM.CHG back; 1 = there was a journal */
+static int ed_unchange_ini( void )
+{
+	char journal[80], l[560], sec[40], old[256], line[256], hdr[44];
+	FILE *f;
+	int i;
+	path_cat( journal, dest, "SYSTEM.CHG" );
+	if ( !( f = fopen( journal, "r" ) ) )
+		return 0;
+	while ( fgets( l, sizeof(l), f ) ) {
+		char *a, *b;
+		strip_eol( l );
+		if ( !( a = strchr( l, '|' ) ) || !( b = strchr( a + 1, '|' ) ) )
+			continue;
+		sprintf( sec, "%.*s", (int)( a - l ) < 39 ? (int)( a - l ) : 39, l );
+		sprintf( old, "%.*s", (int)( b - a - 1 ) < 255 ? (int)( b - a - 1 ) : 255, a + 1 );
+		sprintf( line, "%.255s", b + 1 );
+		sprintf( hdr, "[%s]", sec );
+		if ( ( i = ini_find_line( hdr, line ) ) >= 0 ) {
+			free( ed[i] );
+			ed[i] = str_dup( old );
+		}
+	}
+	fclose( f );
+	return 1;
+}
+
 /* SYSTEM.INI: Set=cond|Section|key=value.  Original values are kept in a
  * package-local journal, so uninstall can restore the exact previous line. */
 static int ini_header_is( const char *line, const char *section )
@@ -949,11 +1021,187 @@ void patch_all( void )
 	patch_variants();
 }
 
+/* --- [Ini] Set=file|section|key=value: any INI file ----------------------
+ * The file is a full path or a name in the Windows directory.  INI.SET in
+ * %DIR% keeps per value the file, the section, the key, whether the key was
+ * there, its previous line and the line written; INSTALL /U puts the
+ * previous line back while the line is still as Setup left it. */
+
+/* "file|section|key=value": the full path of the file and the rest */
+int ini_set_file( const char *text, char *path, const char **rest )
+{
+	const char *bar = strchr( text, '|' );
+	char name[80];
+	if ( !bar || bar == text || bar - text > 79 )
+		return -1;
+	sprintf( name, "%.*s", (int)( bar - text ), text );
+	expand( path, name, 80 );
+	if ( path[1] != ':' ) {
+		if ( !windir[0] || strlen( windir ) + strlen( path ) + 2 > 80 )
+			return -1;
+		strcpy( name, path );
+		path_cat( path, windir, name );
+	}
+	*rest = bar + 1;
+	return 0;
+}
+
+/* the journal has a record of path [section] key */
+static int ini_journal_has( const char *journal, const char *path,
+	const char *section, const char *key )
+{
+	FILE *f = fopen( journal, "r" );
+	char l[6][256];
+	int i, found = 0;
+	if ( !f )
+		return 0;
+	fgets( l[0], sizeof(l[0]), f );
+	while ( !found ) {
+		for ( i = 0; i < 6 && fgets( l[i], sizeof(l[i]), f ); i++ )
+			strip_eol( l[i] );
+		if ( i < 6 )
+			break;
+		found = !stricmp( l[0], path ) && !stricmp( l[1], section ) && !stricmp( l[2], key );
+	}
+	fclose( f );
+	return found;
+}
+
+/* the file being edited (ed) is saved and closed; INSTALL /U removes a
+ * file nothing is left in (Setup created it) */
+static void ini_file_done( char *loaded, int changed )
+{
+	if ( *loaded && changed && uninstall && !ned ) {
+		remove( loaded );
+		changed = 0;
+	}
+	if ( *loaded && changed && ed_save( loaded ) ) {
+		char msg[120];
+		sprintf( msg, "%s %s", T( "WriteError" ), loaded );
+		fail( msg );
+	}
+	if ( *loaded )
+		ed_free();
+	*loaded = 0;
+}
+
+static void ini_set_all( void )
+{
+	char journal[80], path[80], loaded[80], section[40], key[80], line[256], header[44];
+	const char *v, *t, *rest;
+	FILE *file = NULL;
+	int pos = 0, index, end, changed = 0;
+	path_cat( journal, dest, "INI.SET" );
+	*loaded = 0;
+	while ( ( pos = ini_next( "Ini", "Set", pos, &v ) ) >= 0 ) {
+		if ( !( t = cond_new( "Ini", "Set", v ) ) )
+			continue;
+		if ( ini_set_file( t, path, &rest ) || system_set_split( rest, section, key, line ) )
+			fail( T( "IniDefinition" ) );
+		if ( ini_journal_has( journal, path, section, key ) )
+			continue;   /* set by the installed version: its old value stays */
+		if ( stricmp( path, loaded ) ) {
+			ini_file_done( loaded, changed );
+			profile_flush( path );
+			ed_load( path );   /* a new file when there is none */
+			strcpy( loaded, path );
+			changed = 0;
+		}
+		if ( windir[0] && !strnicmp( path, windir, strlen( windir ) ) )
+			gdi_pm_oem_to_ansi( line );   /* Windows INI files are ANSI */
+		if ( ( index = ini_find_key( section, key, &end ) ) == -2 )
+			fail( T( "IniDefinition" ) );
+		if ( !file ) {
+			int fresh = !file_exists( journal );
+			if ( !( file = fopen( journal, "a" ) ) ||
+				( fresh && fprintf( file, "GDI-INI-SET 1\n" ) < 0 ) )
+				fail( T( "IniDefinition" ) );
+		}
+		fprintf( file, "%s\n%s\n%s\n%d\n%s\n%s\n", path, section, key,
+			index >= 0, index >= 0 ? ed[index] : "", line );
+		if ( index >= 0 ) {
+			free( ed[index] );
+			ed[index] = str_dup( line );
+		} else if ( end >= 0 ) {
+			while ( end > 0 && !ed[end - 1][0] )
+				end--;
+			ed_insert( end, line );
+		} else {
+			sprintf( header, "[%s]", section );
+			if ( ned && ed[ned - 1][0] )
+				ed_insert( ned, "" );
+			ed_insert( ned, header );
+			ed_insert( ned, line );
+		}
+		changed = 1;
+	}
+	ini_file_done( loaded, changed );
+	if ( file && fclose( file ) )
+		fail( T( "IniDefinition" ) );
+}
+
+/* INSTALL /U: the values of INI.SET back */
+static void ini_restore_all( void )
+{
+	static char journal[80], loaded[80];
+	char (*l)[256];   /* 6 lines, on the heap: the data segment is full */
+	FILE *f;
+	int i, index, end, changed = 0;
+	path_cat( journal, dest, "INI.SET" );
+	if ( !( f = fopen( journal, "r" ) ) )
+		return;
+	if ( !( l = malloc( 6 * sizeof(*l) ) ) )
+		gdi_out_of_memory();
+	*loaded = 0;
+	if ( !fgets( l[0], sizeof(l[0]), f ) || strncmp( l[0], "GDI-INI-SET 1", 13 ) ) {
+		fclose( f );
+		fail( T( "SetRestoreError" ) );
+	}
+	for ( ;; ) {
+		for ( i = 0; i < 6 && fgets( l[i], sizeof(l[i]), f ); i++ )
+			strip_eol( l[i] );
+		if ( i < 6 )
+			break;
+		if ( stricmp( l[0], loaded ) ) {
+			ini_file_done( loaded, changed );
+			changed = 0;
+			profile_flush( l[0] );
+			if ( ed_load( l[0] ) )
+				continue;   /* the file is gone */
+			strcpy( loaded, l[0] );
+		}
+		index = ini_find_key( l[1], l[2], &end );
+		/* a value changed after the installation stays */
+		if ( index < 0 || strcmp( ed[index], l[5] ) )
+			continue;
+		if ( l[3][0] == '1' ) {
+			free( ed[index] );
+			ed[index] = str_dup( l[4] );
+		} else {
+			ed_delete( index );
+			ed_drop_empty_section( l[1] );
+		}
+		changed = 1;
+	}
+	fclose( f );
+	free( l );
+	ini_file_done( loaded, changed );
+	remove( journal );
+}
+
+void ini_files( void )
+{
+	if ( uninstall )
+		ini_restore_all();
+	else
+		ini_set_all();
+}
+
 /* kind: 0 CONFIG.SYS, 1 AUTOEXEC.BAT, 2 SYSTEM.INI, 3 WIN.INI */
 void edit_file( const char *path, const char *section, int kind )
 {
 	char set_journal_path[80];
-	int restored = 0, set_journal_exists = 0, unadded = 0;
+	int restored = 0, set_journal_exists = 0, unadded = 0, unchanged = 0;
 	if ( kind >= 2 && uninstall ) {
 		path_cat( set_journal_path, dest, set_journal( section ) );
 		set_journal_exists = file_exists( set_journal_path );
@@ -961,10 +1209,13 @@ void edit_file( const char *path, const char *section, int kind )
 			char added[80];
 			path_cat( added, dest, "SYSTEM.ADD" );
 			set_journal_exists |= file_exists( added );
+			path_cat( added, dest, "SYSTEM.CHG" );
+			set_journal_exists |= file_exists( added );
 		}
 	}
 	if ( !has_active( section, "Add" ) && !has_active( section, "Remove" ) &&
 		!has_active( section, "Extend" ) &&
+		!( kind == 2 && has_active( section, "Change" ) ) &&
 		!( kind >= 2 && ( has_active( section, "Set" ) ||
 			set_journal_exists ) ) )
 		return;
@@ -976,8 +1227,10 @@ void edit_file( const char *path, const char *section, int kind )
 		restored = ed_restore_ini( set_journal_path, section );
 		if ( restored < 0 )
 			fail( T( "SetRestoreError" ) );
-		if ( kind == 2 )
+		if ( kind == 2 ) {
 			unadded = ed_unadd_ini();
+			unchanged = ed_unchange_ini();
+		}
 	}
 	if ( !update_mode ) {   /* an update only adds the new entries */
 		ed_remove( section );
@@ -985,8 +1238,10 @@ void edit_file( const char *path, const char *section, int kind )
 			ed_unextend( section );
 	}
 	if ( !uninstall ) {
-		if ( kind == 2 )
+		if ( kind == 2 ) {
 			ed_add_ini();
+			ed_change_ini();
+		}
 		else if ( kind < 2 )
 			ed_add_dos( section, kind == 0 );
 	}
@@ -1001,6 +1256,10 @@ void edit_file( const char *path, const char *section, int kind )
 		remove( set_journal_path );
 	if ( unadded ) {
 		path_cat( set_journal_path, dest, "SYSTEM.ADD" );
+		remove( set_journal_path );
+	}
+	if ( unchanged ) {
+		path_cat( set_journal_path, dest, "SYSTEM.CHG" );
 		remove( set_journal_path );
 	}
 	ed_free();
