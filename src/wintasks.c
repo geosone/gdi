@@ -13,35 +13,13 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include "gdi.h"
 #include "wintasks.h"
 
 #define ABSENT "<GDI-ABSENT>"   /* GetProfileString default: no such value */
 
 static DWORD dde_instance;
 static HCONV conversation;
-
-static void set_error( char *error, unsigned size, const char *text )
-{
-	if ( size ) {
-		strncpy( error, text, size - 1 );
-		error[size - 1] = 0;
-	}
-}
-
-static void path_cat( char *out, const char *dir, const char *name )
-{
-	strcpy( out, dir );
-	if ( *out && out[strlen( out ) - 1] != '\\' )
-		strcat( out, "\\" );
-	strcat( out, name );
-}
-
-static void strip_eol( char *line )
-{
-	int n = strlen( line );
-	while ( n && ( line[n - 1] == '\n' || line[n - 1] == '\r' ) )
-		line[--n] = 0;
-}
 
 /* --- WIN.INI ------------------------------------------------------------ */
 

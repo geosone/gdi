@@ -91,19 +91,6 @@ static void write_completion( void )
 
 /* --- helpers -------------------------------------------------------- */
 
-static void path_cat( char *dst, const char *dir, const char *name )
-{
-	strcpy( dst, dir );
-	if ( *dst && dst[strlen( dst ) - 1] != '\\' )
-		strcat( dst, "\\" );
-	strcat( dst, name );
-}
-
-static int file_exists( const char *p )
-{
-	return access( p, 0 ) == 0;
-}
-
 /* %DIR%, %WINDIR%, %BOOT%, %SRC% */
 static int expand( char *out, const char *in, int max )
 {
@@ -230,7 +217,6 @@ static int condition_true( const char *condition )
  * line of the file, without keeping it in memory */
 static FILE *reg_import;
 static char reg_import_cond[40];
-static void strip_eol( char *line );
 
 static int registry_next( int pos, const char **line )
 {
@@ -451,75 +437,8 @@ static int mkdirs( const char *path )
 	return file_exists( p ) ? 0 : -1;
 }
 
-/* the first parent of the target directory that setup creates: DIRS.LOG
- * names it, and the uninstaller removes the empty parents up to it */
+/* the first parent of the target directory that setup creates (DIRS.LOG) */
 static char dest_top[80];
-
-static void note_new_parents( const char *path )
-{
-	char p[80];
-	int i;
-	dest_top[0] = 0;
-	strcpy( p, path );
-	for ( i = 3; p[i]; i++ )
-		if ( p[i] == '\\' ) {
-			p[i] = 0;
-			if ( !file_exists( p ) ) {
-				strcpy( dest_top, p );
-				return;
-			}
-			p[i] = '\\';
-		}
-}
-
-/* a parent setup created that other packages still use: each of them (a
- * subdirectory with INSTALL.INI and without a DIRS.LOG of its own) gets
- * DIRS.LOG and removes the parents with its own directory later */
-static void hand_over_parents( const char *parent, const char *top )
-{
-	struct find_t found;
-	char p[80], q[80];
-	FILE *f;
-	path_cat( p, parent, "*.*" );
-	if ( _dos_findfirst( p, _A_SUBDIR, &found ) )
-		return;
-	do {
-		if ( !( found.attrib & _A_SUBDIR ) || found.name[0] == '.' )
-			continue;
-		path_cat( p, parent, found.name );
-		path_cat( q, p, "DIRS.LOG" );
-		strcat( p, "\\INSTALL.INI" );
-		if ( !file_exists( p ) || file_exists( q ) )
-			continue;
-		if ( ( f = fopen( q, "w" ) ) != NULL ) {
-			fprintf( f, "%s\n", top );
-			fclose( f );
-		}
-	} while ( !_dos_findnext( &found ) );
-}
-
-/* removes the target directory and the empty parents setup created */
-static void remove_dest_dir( void )
-{
-	char p[80], top[80], *b;
-	FILE *f;
-	top[0] = 0;
-	path_cat( p, dest, "DIRS.LOG" );
-	if ( ( f = fopen( p, "r" ) ) != NULL ) {
-		if ( fgets( top, sizeof(top), f ) )
-			strip_eol( top );
-		fclose( f );
-		remove( p );
-	}
-	strcpy( p, dest );
-	while ( !rmdir( p ) && *top && stricmp( p, top ) &&
-		( b = strrchr( p, '\\' ) ) != NULL && b - p > 2 &&
-		!strnicmp( p, top, strlen( top ) ) )
-		*b = 0;
-	if ( *top && stricmp( p, dest ) && file_exists( p ) &&
-		!strnicmp( p, top, strlen( top ) ) )
-		hand_over_parents( p, top );
-}
 
 static int copy_file( const char *from, const char *to )
 {
@@ -750,7 +669,6 @@ static void ed_unextend( const char *section )
 	}
 }
 
-static void strip_eol( char *line );
 
 /* update: the entries of the installed version (its INSTALL.INI) for the
  * system files and the groups.  An update adds only entries that are new in
@@ -987,14 +905,6 @@ static int ed_unadd_ini( void )
 
 /* SYSTEM.INI: Set=cond|Section|key=value.  Original values are kept in a
  * package-local journal, so uninstall can restore the exact previous line. */
-static void strip_eol( char *line )
-{
-	int length = strlen( line );
-	while ( length && ( line[length - 1] == '\n' || line[length - 1] == '\r' ||
-		line[length - 1] == 0x1A ) )
-		line[--length] = 0;
-}
-
 static int ini_header_is( const char *line, const char *section )
 {
 	int length;
@@ -2386,7 +2296,7 @@ static void ask_dirs( void )
 	strcpy( dest, ini_get( "Setup", "DefaultDir", "C:\\PROGRAM" ) );
 	expand( dest, dest, sizeof(dest) );
 	if ( in_batch ) {   /* [Installer]: the default directory, no questions */
-		note_new_parents( dest );
+		gdi_note_parents( dest, dest_top );
 		if ( mkdirs( dest ) )
 			fail( T( "DirError", "Please enter a full path (e.g. C:\\DRIVERS) that can be created." ) );
 		find_dest();
@@ -2396,7 +2306,7 @@ static void ask_dirs( void )
 	for ( ;; ) {
 		if ( scr_input( T( "DirTitle", "Destination" ), T( "DirText", "Install the files to this directory:" ), dest, 64 ) )
 			abort_setup();
-		note_new_parents( dest );
+		gdi_note_parents( dest, dest_top );
 		if ( strlen( dest ) >= 3 && dest[1] == ':' && dest[2] == '\\' && !mkdirs( dest ) )
 			break;
 		{
@@ -2591,45 +2501,11 @@ static int nold;
  * are replaced.  CONFIG.SYS, AUTOEXEC.BAT, SYSTEM.INI, WIN.INI, the groups,
  * the registry and the package's settings files ([Keep]) stay as they are. */
 
-static void record_path( char *p )
-{
-	sprintf( p, "%s\\GDI.INI", boot );
-}
-
 static int record_read_key( const char *key, char *dir, char *bits, char *version )
 {
-	char p[80], l[200];
-	FILE *f;
-	int in = 0, n, found = 0;
-	record_path( p );
-	n = strlen( key );
-	if ( !( f = fopen( p, "r" ) ) )
-		return 0;
-	while ( !found && fgets( l, sizeof(l), f ) ) {
-		strip_eol( l );
-		if ( *l == '[' )
-			in = !strnicmp( l, "[Installed]", 11 );
-		else if ( in && !strnicmp( l, key, n ) && l[n] == '=' ) {
-			char *a = l + n + 1, *b, *c;
-			if ( ( b = strchr( a, '|' ) ) != NULL )
-				*b++ = 0;
-			else
-				b = a + strlen( a );
-			if ( ( c = strchr( b, '|' ) ) != NULL )
-				*c++ = 0;
-			else
-				c = b + strlen( b );
-			sprintf( dir, "%.79s", a );
-			sprintf( bits, "%.16s", b );
-			sprintf( version, "%.23s", c );
-			found = 1;
-		}
-	}
-	fclose( f );
-	return found;
+	return gdi_record_read( boot, key, dir, bits, version );
 }
 
-/* enter (add) or remove this installation in GDI.INI */
 static int record_read( char *dir, char *bits, char *version )
 {
 	char key[64];
@@ -2637,52 +2513,17 @@ static int record_read( char *dir, char *bits, char *version )
 	return record_read_key( key, dir, bits, version );
 }
 
+/* enter (add) or remove this installation in GDI.INI */
 static void record_write( int add )
 {
-	char p[80], t[80], l[200], key[64], bits[MAXOPT + 1];
-	FILE *in, *out;
-	int n, i, section = 0, done = !add;
-	record_path( p );
-	strcpy( t, p );
-	strcpy( t + strlen( t ) - 3, "$$$" );
+	char key[64], value[120], bits[MAXOPT + 1];
+	int i;
 	ini_package_id( key, sizeof(key) );
-	n = strlen( key );
 	for ( i = 0; i < nopt; i++ )
 		bits[i] = opt_on[i] ? '1' : '0';
 	bits[nopt] = 0;
-	in = fopen( p, "r" );
-	if ( !in && !add )
-		return;
-	if ( !( out = fopen( t, "w" ) ) ) {
-		if ( in )
-			fclose( in );
-		return;
-	}
-	while ( in && fgets( l, sizeof(l), in ) ) {
-		strip_eol( l );
-		if ( *l == '[' ) {
-			if ( section && !done ) {
-				fprintf( out, "%s=%s|%s|%s\n", key, dest, bits, ini_get( "Setup", "Version", "" ) );
-				done = 1;
-			}
-			section = !strnicmp( l, "[Installed]", 11 );
-		} else if ( section && !strnicmp( l, key, n ) && l[n] == '=' )
-			continue;
-		fprintf( out, "%s\n", l );
-	}
-	if ( !done ) {
-		if ( !section )
-			fprintf( out, "[Installed]\n" );
-		fprintf( out, "%s=%s|%s|%s\n", key, dest, bits, ini_get( "Setup", "Version", "" ) );
-	}
-	if ( in )
-		fclose( in );
-	if ( fclose( out ) ) {
-		remove( t );
-		return;
-	}
-	remove( p );
-	rename( t, p );
+	sprintf( value, "%s|%s|%.23s", dest, bits, ini_get( "Setup", "Version", "" ) );
+	gdi_record_write( boot, key, add ? value : NULL );
 }
 
 /* an earlier installation of this package: ask, then update it */
@@ -3127,7 +2968,7 @@ static void remove_all( void )
 		remove( p );
 		path_cat( p, dest, "INSTALL.EXE" );
 		remove( p );
-		remove_dest_dir();
+		gdi_remove_dirs( dest );
 	}
 }
 

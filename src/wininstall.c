@@ -50,21 +50,6 @@ static char environment_text[80];
 static char option_label[MAXOPT][80];
 static char option_on[MAXOPT];
 
-static void path_cat( char *out, const char *dir, const char *name )
-{
-    strcpy( out, dir );
-    if ( *out && out[strlen( out ) - 1] != '\\' )
-        strcat( out, "\\" );
-    strcat( out, name );
-}
-
-static int file_exists( const char *path )
-{
-    OFSTRUCT of;
-    HFILE file = OpenFile( path, &of, OF_EXIST );
-    return file != HFILE_ERROR;
-}
-
 /* The Win16 UPX loader writes the original packed filename beside its
  * temporary executable as UPX*.SRC. */
 static int packed_source_path( const char *module, char *path, unsigned path_size )
@@ -151,37 +136,9 @@ static int delete_file( const char *path )
     return !file_exists( path );
 }
 
-/* a parent setup created that other packages still use: each of them (a
- * subdirectory with INSTALL.INI and without a DIRS.LOG of its own) gets
- * DIRS.LOG and removes the parents with its own directory later */
-static void hand_over_parents( const char *parent, const char *top )
-{
-    struct find_t found;
-    char p[128], q[128];
-    FILE *f;
-    path_cat( p, parent, "*.*" );
-    if ( _dos_findfirst( p, _A_SUBDIR, &found ) )
-        return;
-    do {
-        if ( !( found.attrib & _A_SUBDIR ) || found.name[0] == '.' )
-            continue;
-        path_cat( p, parent, found.name );
-        path_cat( q, p, "DIRS.LOG" );
-        strcat( p, "\\INSTALL.INI" );
-        if ( !file_exists( p ) || file_exists( q ) )
-            continue;
-        if ( ( f = fopen( q, "w" ) ) != NULL ) {
-            fprintf( f, "%s\n", top );
-            fclose( f );
-        }
-    } while ( !_dos_findnext( &found ) );
-}
-
 static void delete_uninstaller( void )
 {
-    char path[128], parent[128], top[128], *slash;
-    struct find_t found_dir;
-    FILE *f;
+    char path[128], parent[128];
     path_cat( path, source_dir, "INSTALL.INI" );
     delete_file( path );
     path_cat( path, source_dir, "INSTALL.EXE" );
@@ -198,32 +155,13 @@ static void delete_uninstaller( void )
     }
     path_cat( path, source_dir, "UNINST.PND" );
     delete_file( path );
-    top[0] = 0;   /* DIRS.LOG: the first parent setup created */
-    path_cat( path, source_dir, "DIRS.LOG" );
-    if ( ( f = fopen( path, "r" ) ) != NULL ) {
-        if ( fgets( top, sizeof(top), f ) )
-            top[strcspn( top, "\r\n" )] = 0;
-        fclose( f );
-        delete_file( path );
-    }
-    strcpy( parent, source_dir );
-    slash = strrchr( parent, '\\' );
-    if ( slash == parent + 2 )
-        slash[1] = 0;
-    else if ( slash )
-        *slash = 0;
-    if ( *top && parent[1] == ':' )
-        parent[3] = 0;   /* the parents go as well: out to the root */
-    if ( slash )
+    strcpy( parent, source_dir );   /* out of it and of its parents */
+    if ( parent[1] == ':' ) {
+        parent[2] = '\\';
+        parent[3] = 0;
         chdir( parent );
-    strcpy( path, source_dir );
-    while ( !rmdir( path ) && *top && stricmp( path, top ) &&
-            ( slash = strrchr( path, '\\' ) ) != NULL && slash - path > 2 &&
-            !strnicmp( path, top, strlen( top ) ) )
-        *slash = 0;
-    if ( *top && stricmp( path, source_dir ) && !strnicmp( path, top, strlen( top ) ) &&
-         !_dos_findfirst( path, _A_SUBDIR, &found_dir ) )
-        hand_over_parents( path, top );
+    }
+    gdi_remove_dirs( source_dir );
 }
 
 /* -1 = not complete yet; 0 = success; 1 = cancelled; 2 = failed. */
@@ -434,23 +372,18 @@ static void read_package( void )
  * earlier installation are kept, only its files are replaced */
 static void find_update( void )
 {
-    char record[16], key[64], value[160], ini[100], *bits, *version;
+    char boot[3], key[64], value[80], bits[MAXOPT + 1], version[24], ini[100];
     union REGS r;
     int i;
     if ( stricmp( ini_get( "Setup", "Uninstall", "yes" ), "yes" ) )
         return;
     r.x.ax = 0x3305;   /* boot drive */
     intdos( &r, &r );
-    wsprintf( record, "%c:\\GDI.INI", 'A' + ( r.h.dl ? r.h.dl : 3 ) - 1 );
+    wsprintf( boot, "%c:", 'A' + ( r.h.dl ? r.h.dl : 3 ) - 1 );
     ini_package_id( key, sizeof(key) );
     AnsiToOem( key, key );   /* GDI.INI is written by the DOS engine */
-    WritePrivateProfileString( NULL, NULL, NULL, record );   /* no cached copy */
-    GetPrivateProfileString( "Installed", key, "", value, sizeof(value), record );
-    if ( !( bits = strchr( value, '|' ) ) )
+    if ( !gdi_record_read( boot, key, value, bits, version ) )
         return;
-    *bits++ = 0;
-    if ( ( version = strchr( bits, '|' ) ) != NULL )
-        *version++ = 0;
     path_cat( ini, value, "INSTALL.INI" );
     if ( !file_exists( ini ) )
         return;
@@ -462,10 +395,10 @@ static void find_update( void )
     sprintf( welcome_text, ini_get( "Text", "UpdateText",
              "%s is already installed in %s. Setup replaces its files; the system settings and the settings files of the program stay as they are." ),
              product, value );
-    if ( ( version && *version ) || *ini_get( "Setup", "Version", "" ) )
+    if ( *version || *ini_get( "Setup", "Version", "" ) )
         sprintf( welcome_text + strlen( welcome_text ), "\r\n\r\n%s %.20s\r\n%s %.20s",
                  ini_get( "Text", "UpdateOld", "Installed version:" ),
-                 version && *version ? version : "?",
+                 *version ? version : "?",
                  ini_get( "Text", "UpdateNew", "New version:" ),
                  *ini_get( "Setup", "Version", "" ) ? ini_get( "Setup", "Version", "" ) : "?" );
 }

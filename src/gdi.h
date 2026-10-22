@@ -51,6 +51,19 @@ char       *str_dup( const char *s );
 const char *arc_install( const char *base, int (*target)( const char *name, char *path ) );
 const char *arc_errfile( void );
 
+/* util.c (DOS engine and Windows frontend) */
+void path_cat( char *out, const char *dir, const char *name );
+int  file_exists( const char *path );   /* a file or a directory */
+void strip_eol( char *line );
+void set_error( char *error, unsigned size, const char *text );
+
+/* journal.c (DOS engine and Windows frontend): GDI.INI on the boot drive,
+ * DIRS.LOG */
+int  gdi_record_read( const char *boot, const char *key, char *dir, char *bits, char *version );
+void gdi_record_write( const char *boot, const char *key, const char *value );
+void gdi_note_parents( const char *dir, char *top );
+void gdi_remove_dirs( const char *dir );
+
 /* install.c: called by archive.c */
 void gdi_progress( unsigned long done, unsigned long total );
 void gdi_progress_name( const char *name );

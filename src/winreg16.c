@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <io.h>
+#include "gdi.h"
 #include "regtxn.h"
 #include "winreg16.h"
 
@@ -18,14 +19,6 @@ static struct gdi_reg_record reg_record;
 static unsigned char reg_data[GDI_REG_DATA_MAX];
 static char reg_line[1200];
 static long __far record_offset[MAX_JOURNAL_RECORDS];   /* own segment */
-
-static void set_error( char *error, unsigned size, const char *text )
-{
-    if ( size ) {
-        strncpy( error, text, size - 1 );
-        error[size - 1] = 0;
-    }
-}
 
 static void api_error( char *error, unsigned size, const char *action,
                        LONG result )

@@ -12,8 +12,8 @@ LINK := $(WATCOM)/binl/wlink
 COPT := -q -bt=dos -ms -0 -os -s -zq -wx -I$(WATCOM)/h
 WCOPT := -q -bt=windows -ms -0 -zW -os -s -zq -w4 -we -I$(WATCOM)/h -I$(WATCOM)/h/win
 
-OBJS := $(addprefix $(OUT)/,install.obj screen.obj ini.obj archive.obj hexpatch.obj regtxn.obj progman.obj)
-WINOBJS := $(OUT)/wininstall.obj $(OUT)/winini.obj $(OUT)/winregtxn.obj $(OUT)/winreg16.obj $(OUT)/wintasks.obj
+OBJS := $(addprefix $(OUT)/,install.obj util.obj journal.obj screen.obj ini.obj archive.obj hexpatch.obj regtxn.obj progman.obj)
+WINOBJS := $(OUT)/wininstall.obj $(OUT)/winutil.obj $(OUT)/winjournal.obj $(OUT)/winini.obj $(OUT)/winregtxn.obj $(OUT)/winreg16.obj $(OUT)/wintasks.obj
 DOSIMAGE := $(OUT)/INSTALL.STB
 DOSPACKED := $(OUT)/INSTALL.PST
 WINIMAGE := $(OUT)/INSTALL.UNP
@@ -48,16 +48,22 @@ $(DOSPACKED): $(DOSIMAGE) upx
 $(OUT)/wininstall.obj: src/wininstall.c src/gdi.h src/wintasks.h | $(OUT)
 	$(CC) $(WCOPT) -fo=$@ $<
 
+$(OUT)/winutil.obj: src/util.c src/gdi.h | $(OUT)
+	$(CC) $(WCOPT) -fo=$@ $<
+
+$(OUT)/winjournal.obj: src/journal.c src/gdi.h | $(OUT)
+	$(CC) $(WCOPT) -fo=$@ $<
+
 $(OUT)/winini.obj: src/ini.c src/gdi.h | $(OUT)
 	$(CC) $(WCOPT) -fo=$@ $<
 
 $(OUT)/winregtxn.obj: src/regtxn.c src/regtxn.h | $(OUT)
 	$(CC) $(WCOPT) -fo=$@ $<
 
-$(OUT)/wintasks.obj: src/wintasks.c src/wintasks.h | $(OUT)
+$(OUT)/wintasks.obj: src/wintasks.c src/wintasks.h src/gdi.h | $(OUT)
 	$(CC) $(WCOPT) -fo=$@ $<
 
-$(OUT)/winreg16.obj: src/winreg16.c src/winreg16.h src/regtxn.h | $(OUT)
+$(OUT)/winreg16.obj: src/winreg16.c src/winreg16.h src/regtxn.h src/gdi.h | $(OUT)
 	$(CC) $(WCOPT) -fo=$@ $<
 
 $(WINIMAGE): $(DOSPACKED) $(WINOBJS)
