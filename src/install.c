@@ -22,6 +22,7 @@
 #include <setjmp.h>
 #include <malloc.h>
 #include "gdi.h"
+#include "ui.h"
 #include "hexpatch.h"
 #include "regtxn.h"
 #include "progman.h"
@@ -76,6 +77,11 @@ static const char *T( const char *key, const char *def )
 		memmove( p + 1, p + 2, strlen( p + 2 ) + 1 );
 	}
 	return v;
+}
+
+const char *gdi_text( const char *key, const char *def )
+{
+	return T( key, def );
 }
 
 static void write_completion( void )
@@ -464,11 +470,11 @@ static int copy_file( const char *from, const char *to )
 static void fail( const char *text )
 {
 	static const char *ok[] = { "OK" };
-	scr_message( T( "ErrorTitle", "Error" ), text, ok, 1, 0, 1 );
+	ui_message( T( "ErrorTitle", "Error" ), text, ok, 1, 0, 1 );
 	if ( in_extra )
 		longjmp( extra_abort, 2 );
 	completion_status = 2;
-	scr_exit();
+	ui_exit();
 	exit( 2 );
 }
 
@@ -480,11 +486,11 @@ void gdi_out_of_memory( void )
 static void abort_setup( void )
 {
 	static const char *ok[] = { "OK" };
-	scr_message( T( "AbortTitle", "Setup" ), T( "Aborted", "Setup was cancelled. Nothing was changed." ), ok, 1, 0, 0 );
+	ui_message( T( "AbortTitle", "Setup" ), T( "Aborted", "Setup was cancelled. Nothing was changed." ), ok, 1, 0, 0 );
 	if ( in_extra )
 		longjmp( extra_abort, 1 );
 	completion_status = 1;
-	scr_exit();
+	ui_exit();
 	exit( 1 );
 }
 
@@ -2078,8 +2084,7 @@ static void show_text( const char *title, const char *file, const char **buttons
 		                                        : T( "MissingFile", "File not found:" ), p );
 		fail( msg );
 	}
-	scr_keys( T( "KeysView", "PgUp=Page up  PgDn=Page down  Enter=Select  Esc=Abort" ) );
-	rc = scr_view( title, l, nl, buttons, n, 0 );
+	rc = ui_view( title, l, nl, buttons, n, 0 );
 	text_free( l, nl );
 	if ( must && rc != 0 )
 		abort_setup();
@@ -2147,7 +2152,7 @@ static void show_license( const char *value, const char **buttons )
 			!accepted_name[i][0] && accepted_len[i] == len && accepted_sum[i] == sum )
 			return;   /* accepted already */
 	show_text( title, file, buttons, 2, 1 );
-	scr_desktop();
+	ui_clear();
 	if ( known && naccepted < MAXACCEPTED ) {
 		strcpy( accepted_name[naccepted], name_buf );
 		accepted_len[naccepted] = len;
@@ -2241,8 +2246,7 @@ static void welcome( void )
 		text[pos - 1] = 0;
 	if ( !text[0] )
 		sprintf( text, "%s %s.", T( "WelcomeText", "This program installs" ), ini_get( "Setup", "Product", "the software" ) );
-	scr_keys( T( "KeysMsg", "Enter=Select  Esc=Abort" ) );
-	if ( scr_message( T( "WelcomeTitle", "Welcome" ), text, b, 2, 0, 0 ) != 0 )
+	if ( ui_message( T( "WelcomeTitle", "Welcome" ), text, b, 2, 0, 0 ) != 0 )
 		abort_setup();
 }
 
@@ -2284,8 +2288,7 @@ static void ask_options( void )
 	sprintf( title, "%.40s", T( "OptionsTitle", "Options" ) );
 	if ( in_batch )   /* [Installer]: which package */
 		sprintf( title + strlen( title ), " - %.45s", ini_get( "Setup", "Product", "" ) );
-	scr_keys( T( "KeysOpt", "Space=On/off  Enter=Continue  Esc=Abort" ) );
-	if ( scr_checklist( title,
+	if ( ui_checklist( title,
 		T( "OptionsText", "Select the parts to install (Space switches on/off):" ), opt_label, opt_on, nopt ) )
 		abort_setup();
 }
@@ -2302,16 +2305,15 @@ static void ask_dirs( void )
 		find_dest();
 		return;
 	}
-	scr_keys( T( "KeysInput", "Enter=Continue  Esc=Abort" ) );
 	for ( ;; ) {
-		if ( scr_input( T( "DirTitle", "Destination" ), T( "DirText", "Install the files to this directory:" ), dest, 64 ) )
+		if ( ui_input( T( "DirTitle", "Destination" ), T( "DirText", "Install the files to this directory:" ), dest, 64 ) )
 			abort_setup();
 		gdi_note_parents( dest, dest_top );
 		if ( strlen( dest ) >= 3 && dest[1] == ':' && dest[2] == '\\' && !mkdirs( dest ) )
 			break;
 		{
 			static const char *ok[] = { "OK" };
-			scr_message( T( "ErrorTitle", "Error" ), T( "DirError", "Please enter a full path (e.g. C:\\DRIVERS) that can be created." ), ok, 1, 0, 1 );
+			ui_message( T( "ErrorTitle", "Error" ), T( "DirError", "Please enter a full path (e.g. C:\\DRIVERS) that can be created." ), ok, 1, 0, 1 );
 		}
 	}
 	find_dest();
@@ -2319,7 +2321,7 @@ static void ask_dirs( void )
 		has_entry( "Win.ini", "Set" ) || has_progman() ||
 		ini_lines( "Registry", 0, &value ) >= 0 || hexpatch_needs_windows() ) {
 		find_windows();
-		if ( scr_input( T( "WinTitle", "Windows" ),
+		if ( ui_input( T( "WinTitle", "Windows" ),
 			T( "WinText", "Windows directory for the SYSTEM.INI entries (empty: no Windows):" ), windir, 64 ) )
 			abort_setup();
 	}
@@ -2421,8 +2423,7 @@ static int confirm( void )
 		strcat( text, T( "SumUpdateKeep", "Existing entries and the settings files of the program stay as they are." ) );
 	} else
 		strcat( text, T( "SumBackup", "\nThe original files are kept as *.G01, *.G02, ..." ) );
-	scr_keys( T( "KeysMsg", "Enter=Select  Esc=Abort" ) );
-	return scr_message( update_mode ? T( "SumUpdateTitle", "Ready to update" ) :
+	return ui_message( update_mode ? T( "SumUpdateTitle", "Ready to update" ) :
 		T( "SumTitle", "Ready to install" ), text, b, 2, 0, 0 ) == 0;
 }
 
@@ -2460,7 +2461,7 @@ static char progname[40];
 
 void gdi_progress( unsigned long done, unsigned long total )
 {
-	scr_progress( progtitle, progname, done ? done : 1, total ? total : 1 );
+	ui_progress( progtitle, progname, done ? done : 1, total ? total : 1 );
 }
 
 void gdi_progress_name( const char *name )
@@ -2481,10 +2482,9 @@ int gdi_ask_disk( int n )
 	sprintf( msg, T( "InsertDisk", "Please insert disk %d into drive %c:" ), n, srcdir[0] );
 	if ( ini_get( "Disks", key, NULL ) )
 		sprintf( msg + strlen( msg ), "\n\n%s", ini_get( "Disks", key, "" ) );
-	scr_keys( T( "KeysMsg", "Enter=Select  Esc=Abort" ) );
-	rc = scr_message( T( "DiskTitle", "Next disk" ), msg, b, 2, 0, 0 );
-	scr_desktop();
-	scr_progress( progtitle, "", 0, 1 );
+	rc = ui_message( T( "DiskTitle", "Next disk" ), msg, b, 2, 0, 0 );
+	ui_clear();
+	ui_progress( progtitle, "", 0, 1 );
 	return rc != 0;
 }
 
@@ -2549,9 +2549,8 @@ static void find_update( void )
 			T( "UpdateNew", "New version:" ), *version ? version : "?" );
 	b[0] = T( "Update", "Update" );
 	b[1] = T( "Cancel", "Cancel" );
-	scr_desktop();
-	scr_keys( T( "KeysMsg", "Enter=Select  Esc=Abort" ) );
-	if ( !in_batch && scr_message( T( "UpdateTitle", "Update" ), text, b, 2, 0, 0 ) != 0 )
+	ui_clear();
+	if ( !in_batch && ui_message( T( "UpdateTitle", "Update" ), text, b, 2, 0, 0 ) != 0 )
 		abort_setup();
 	update_mode = 1;
 	strcpy( dest, dir );
@@ -2783,7 +2782,7 @@ static void copy_all( void )
 	if ( unin )
 		total += 2;
 	pos = 0;
-	scr_progress( progtitle, "", 0, total );
+	ui_progress( progtitle, "", 0, total );
 	while ( ( pos = ini_lines( "Files", pos, &v ) ) >= 0 ) {
 		if ( !( t = cond( v ) ) )
 			continue;
@@ -2795,7 +2794,7 @@ static void copy_all( void )
 			continue;   /* in the archive */
 		file_target( t, name, to );
 		make_parent( to );
-		scr_progress( progtitle, name, ++done, total );
+		ui_progress( progtitle, name, ++done, total );
 		if ( keep_file( to ) )
 			continue;
 		log_file( to );
@@ -2809,7 +2808,7 @@ static void copy_all( void )
 	for ( i = 0; i < nfind; i++ )
 		if ( finds[i].file[0] && find_used( finds[i].name ) ) {
 			path_cat( from, srcdir, finds[i].file );
-			scr_progress( progtitle, finds[i].file, done, total );
+			ui_progress( progtitle, finds[i].file, done, total );
 			log_file( finds[i].path );
 			if ( copy_file( from, finds[i].path ) ) {
 				char msg[160];
@@ -2821,19 +2820,19 @@ static void copy_all( void )
 		/* INSTALL /U in the target directory removes the installation */
 		path_cat( from, srcdir, "INSTALL.EXE" );
 		path_cat( to, dest, "INSTALL.EXE" );
-		scr_progress( progtitle, "INSTALL.EXE", ++done, total );
+		ui_progress( progtitle, "INSTALL.EXE", ++done, total );
 		copy_file( from, to );
 		path_cat( from, srcdir, "INSTALL.INI" );
 		path_cat( to, dest, "INSTALL.INI" );
-		scr_progress( progtitle, "INSTALL.INI", ++done, total );
+		ui_progress( progtitle, "INSTALL.INI", ++done, total );
 		copy_file( from, to );
 	}
 	if ( arc ) {
 		char base[80];
 		const char *err;
 		path_cat( base, srcdir, arc );
-		scr_desktop();
-		scr_progress( progtitle, "", 0, 1 );
+		ui_clear();
+		ui_progress( progtitle, "", 0, 1 );
 		if ( ( err = arc_install( base, arc_target ) ) != NULL ) {
 			char msg[160];
 			if ( !strcmp( err, "Cancelled" ) )
@@ -2859,11 +2858,11 @@ static void copy_all( void )
 static int run_program( const char *cmdline )
 {
 	int rc;
-	scr_exit();
+	ui_exit();
 	rc = spawn_program( cmdline );
-	scr_init();
-	scr_bars( ini_get( "Setup", "Title", "Setup" ), ini_get( "Setup", "Product", "GeosOne Dual Installer" ), "" );
-	scr_desktop();
+	ui_init();
+	ui_title( ini_get( "Setup", "Title", "Setup" ), ini_get( "Setup", "Product", "GeosOne Dual Installer" ) );
+	ui_clear();
 	return rc;
 }
 
@@ -2904,8 +2903,7 @@ static void remove_all( void )
 	static const char *b[2];
 	b[0] = T( "Remove", "Remove" );
 	b[1] = T( "Cancel", "Cancel" );
-	scr_keys( T( "KeysMsg", "Enter=Select  Esc=Abort" ) );
-	if ( scr_message( T( "UninstTitle", "Remove" ), T( "UninstText", "Remove the installation from this directory and its entries from CONFIG.SYS, AUTOEXEC.BAT and SYSTEM.INI?" ), b, 2, 1, 0 ) != 0 )
+	if ( ui_message( T( "UninstTitle", "Remove" ), T( "UninstText", "Remove the installation from this directory and its entries from CONFIG.SYS, AUTOEXEC.BAT and SYSTEM.INI?" ), b, 2, 1, 0 ) != 0 )
 		abort_setup();
 	strcpy( dest, srcdir );
 	for ( pos = 0; pos < MAXOPT; pos++ )
@@ -3010,9 +3008,8 @@ static void ask_reboot( const char *text )
 {
 	static const char *b[1];
 	b[0] = T( "Restart", "Restart" );
-	scr_keys( T( "KeysMsg", "Enter=Select  Esc=Abort" ) );
-	scr_message( T( "RestartTitle", "Restart" ), text, b, 1, 0, 0 );
-	scr_exit();
+	ui_message( T( "RestartTitle", "Restart" ), text, b, 1, 0, 0 );
+	ui_exit();
 	reboot();
 }
 
@@ -3025,12 +3022,11 @@ static void dos_prepare( void )
 	b[1] = T( "Exit", "Exit" );
 	_harderr( harderr_fail );
 	while ( ( st = drive_state( boot[0] ) ) != 0 ) {
-		scr_desktop();
-		scr_keys( T( "KeysMsg", "Enter=Select  Esc=Abort" ) );
+		ui_clear();
 		if ( st == 2 ) {
 			b[0] = T( "StartFdisk", "Start FDISK" );
 			sprintf( msg, T( "FdiskText", "There is no drive %s yet. FDISK starts now: create a primary DOS partition (and make it active), then leave FDISK. The computer restarts and Setup continues." ), boot );
-			if ( scr_message( T( "DiskSetupTitle", "Hard disk" ), msg, b, 2, 0, 0 ) )
+			if ( ui_message( T( "DiskSetupTitle", "Hard disk" ), msg, b, 2, 0, 0 ) )
 				abort_setup();
 			run_program( ini_get( "Setup", "Fdisk", "FDISK.EXE" ) );
 			if ( drive_state( boot[0] ) == 2 ) {
@@ -3041,7 +3037,7 @@ static void dos_prepare( void )
 			char cmd[100];
 			b[0] = T( "StartFormat", "Format" );
 			sprintf( msg, T( "FormatText", "Drive %s is not formatted yet. Format it now? All data on it is lost." ), boot );
-			if ( scr_message( T( "DiskSetupTitle", "Hard disk" ), msg, b, 2, 0, 0 ) )
+			if ( ui_message( T( "DiskSetupTitle", "Hard disk" ), msg, b, 2, 0, 0 ) )
 				abort_setup();
 			sprintf( cmd, "%s", ini_get( "Setup", "Format", "FORMAT.COM %BOOT%" ) );
 			run_program( cmd );
@@ -3082,7 +3078,7 @@ static void ask_language( void )
 		count++;
 	}
 	if ( !count ) return;
-	selected = scr_message( T( "LanguageTitle", "Language" ),
+	selected = ui_message( T( "LanguageTitle", "Language" ),
 		T( "LanguageText", "Select the application language to install:" ),
 		buttons, count, selected, 0 );
 	if ( selected < 0 ) abort_setup();
@@ -3147,25 +3143,25 @@ static void install_steps( void )
 	find_update();
 	if ( !in_batch )   /* [Installer]: asked for all packages before */
 		license();
-	scr_desktop();
+	ui_clear();
 	if ( !update_mode ) {
 		ask_dirs();
-		scr_desktop();
+		ui_clear();
 		if ( in_batch )
 			batch_choices();
 		else {
 			ask_options();
-			scr_desktop();
+			ui_clear();
 			ask_language();
 		}
-		scr_desktop();
+		ui_clear();
 		if ( registry_write_plan( registry_error ) )
 			fail( registry_error );
 	}
 	task_write_plan();   /* an update: only the new Program Manager items */
 	if ( !in_batch && !confirm() )
 		abort_setup();
-	scr_desktop();
+	ui_clear();
 	run_all( "Before" );
 	copy_all();
 	if ( !update_mode ) {   /* an update keeps the system settings */
@@ -3197,8 +3193,8 @@ static void use_ini( const char *dir )
 	find_files();
 	detect_all();
 	read_options();
-	scr_bars( ini_get( "Setup", "Title", "Setup" ), ini_get( "Setup", "Product", "GeosOne Dual Installer" ), "" );
-	scr_desktop();
+	ui_title( ini_get( "Setup", "Title", "Setup" ), ini_get( "Setup", "Product", "GeosOne Dual Installer" ) );
+	ui_clear();
 }
 
 /* further installations: the INSTALL.INI of another disk or directory is
@@ -3214,22 +3210,20 @@ static void extras( void )
 	for ( ;; ) {
 		b[0] = T( "InstallMore", "Install" );
 		b[1] = T( "Finish", "Finish" );
-		scr_desktop();
-		scr_keys( T( "KeysMsg", "Enter=Select  Esc=Abort" ) );
-		if ( scr_message( T( "ExtrasTitle", "Additional software" ),
+		ui_clear();
+		if ( ui_message( T( "ExtrasTitle", "Additional software" ),
 			T( "ExtrasText", "Do you want to install additional software now (drivers, tools)? Insert its disk or enter the directory that contains its INSTALL.INI." ),
 			b, 2, 0, 0 ) )
 			break;
-		scr_desktop();
-		scr_keys( T( "KeysInput", "Enter=Continue  Esc=Abort" ) );
-		if ( scr_input( T( "ExtrasTitle", "Additional software" ), T( "ExtrasDirText", "Directory with INSTALL.INI:" ), dir, 64 ) )
+		ui_clear();
+		if ( ui_input( T( "ExtrasTitle", "Additional software" ), T( "ExtrasDirText", "Directory with INSTALL.INI:" ), dir, 64 ) )
 			continue;
 		path_cat( ini, dir, "INSTALL.INI" );
 		if ( !file_exists( ini ) ) {
 			static const char *ok[] = { "OK" };
 			char msg[120];
 			sprintf( msg, "%s %s", T( "MissingFile", "File not found:" ), ini );
-			scr_message( T( "ErrorTitle", "Error" ), msg, ok, 1, 0, 1 );
+			ui_message( T( "ErrorTitle", "Error" ), msg, ok, 1, 0, 1 );
 			continue;
 		}
 		ini_save();
@@ -3241,11 +3235,11 @@ static void extras( void )
 		in_extra = 1;
 		if ( !setjmp( extra_abort ) ) {
 			install_steps();
-			scr_desktop();
+			ui_clear();
 			{
 				static const char *ok[1];
 				ok[0] = T( "OK", "OK" );
-				scr_message( T( "DoneTitle", "Setup complete" ),
+				ui_message( T( "DoneTitle", "Setup complete" ),
 					ini_get( "Setup", "Done", T( "DoneText", "The installation is complete." ) ), ok, 1, 0, 0 );
 			}
 		}
@@ -3287,12 +3281,12 @@ static void batch_ask( void )
 	int i;
 	find_update();
 	license();
-	scr_desktop();
+	ui_clear();
 	if ( !update_mode ) {
 		ask_options();
-		scr_desktop();
+		ui_clear();
 		ask_language();
-		scr_desktop();
+		ui_clear();
 	}
 	for ( i = 0; i < nopt; i++ )
 		c[i] = opt_on[i] ? '1' : '0';
@@ -3390,15 +3384,13 @@ static void run_installers( void )
 	read_installers();
 	if ( !ninst )
 		return;
-	scr_keys( T( "KeysOpt", "Space=On/off  Enter=Continue  Esc=Abort" ) );
 	if ( stricmp( ini_get( "Installer", "Select", "yes" ), "no" ) &&
-		scr_checklist( T( "InstTitle", "Packages" ),
+		ui_checklist( T( "InstTitle", "Packages" ),
 		T( "InstText", "Select the packages to install (Space switches on/off):" ), (const char **)inst_label, inst_on, ninst ) )
 		abort_setup();
-	scr_desktop();
+	ui_clear();
 	find_windows();
-	scr_keys( T( "KeysInput", "Enter=Continue  Esc=Abort" ) );
-	if ( scr_input( T( "WinTitle", "Windows" ),
+	if ( ui_input( T( "WinTitle", "Windows" ),
 		T( "WinText", "Windows directory for the SYSTEM.INI entries (empty: no Windows):" ), windir, 64 ) )
 		abort_setup();
 	strcpy( maindir, srcdir );
@@ -3411,7 +3403,7 @@ static void run_installers( void )
 			if ( !inst_on[i] || inst_state[i] )
 				continue;
 			inst_files( inst_path[i], dir, ini );
-			scr_desktop();
+			ui_clear();
 			ini_save();
 			if ( ini_load( ini ) ) {
 				ini_restore();
@@ -3453,9 +3445,8 @@ static void run_installers( void )
 				inst_state[i] == 3 ? T( "InstCancelled", "cancelled" ) :
 				inst_state[i] == 4 ? T( "InstNeedDos", "only from MS-DOS" ) : T( "InstFailed", "failed" ) );
 	ok[0] = T( "OK", "OK" );
-	scr_desktop();
-	scr_keys( T( "KeysMsg", "Enter=Select  Esc=Abort" ) );
-	scr_message( T( "InstTitle", "Packages" ), text, ok, 1, 0, 0 );
+	ui_clear();
+	ui_message( T( "InstTitle", "Packages" ), text, ok, 1, 0, 0 );
 }
 
 static void finish( void )
@@ -3465,8 +3456,7 @@ static void finish( void )
 	int rc;
 	b[0] = T( "OK", "OK" );
 	b[1] = T( "ShowReadme", "Readme" );
-	scr_keys( T( "KeysMsg", "Enter=Select  Esc=Abort" ) );
-	rc = scr_message( T( "DoneTitle", "Setup complete" ),
+	rc = ui_message( T( "DoneTitle", "Setup complete" ),
 		uninstall ? T( "UninstDone", "The installation has been removed. Restart the computer to unload the drivers." )
 		          : ini_get( "Setup", "Done", T( "DoneText", "The installation is complete. Restart the computer to load the drivers." ) ),
 		b, readme && !uninstall ? 2 : 1, 0, 0 );
@@ -3477,7 +3467,7 @@ static void finish( void )
 	}
 	if ( dosmode ) {
 		char msg[200];
-		scr_desktop();
+		ui_clear();
 		sprintf( msg, T( "DosDoneText", "Remove the disk from drive %c: and restart the computer." ), srcdir[0] );
 		ask_reboot( msg );
 	}
@@ -3588,9 +3578,9 @@ int main( int argc, char **argv )
 	find_files();
 	detect_all();
 
-	scr_init();
-	scr_bars( ini_get( "Setup", "Title", "Setup" ), ini_get( "Setup", "Product", "GeosOne Dual Installer" ), "" );
-	scr_desktop();
+	ui_init();
+	ui_title( ini_get( "Setup", "Title", "Setup" ), ini_get( "Setup", "Product", "GeosOne Dual Installer" ) );
+	ui_clear();
 	read_options();
 	if ( !stricmp( ini_get( "Setup", "Windows", "yes" ), "no" ) && windows_running() )
 		fail( T( "NeedDos", "Please quit Windows and run this setup from MS-DOS." ) );
@@ -3601,14 +3591,14 @@ int main( int argc, char **argv )
 			welcome();
 			license();
 			dos_prepare();
-			scr_desktop();
+			ui_clear();
 			ask_dirs();
-			scr_desktop();
+			ui_clear();
 			ask_options();
-			scr_desktop();
+			ui_clear();
 			if ( !confirm() )
 				abort_setup();
-			scr_desktop();
+			ui_clear();
 			run_all( "Before" );
 			copy_all();
 			edit_all();
@@ -3616,16 +3606,16 @@ int main( int argc, char **argv )
 		} else if ( ini_get( "Installer", "Inst1", NULL ) ) {
 			welcome();
 			license();
-			scr_desktop();
+			ui_clear();
 			run_installers();
 		} else
 			install_steps();
 		if ( !stricmp( ini_get( "Setup", "Extras", "no" ), "yes" ) )
 			extras();
 	}
-	scr_desktop();
+	ui_clear();
 	finish();
 	completion_status = 0;
-	scr_exit();
+	ui_exit();
 	return 0;
 }

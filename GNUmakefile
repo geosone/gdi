@@ -12,7 +12,7 @@ LINK := $(WATCOM)/binl/wlink
 COPT := -q -bt=dos -ms -0 -os -s -zq -wx -I$(WATCOM)/h
 WCOPT := -q -bt=windows -ms -0 -zW -os -s -zq -w4 -we -I$(WATCOM)/h -I$(WATCOM)/h/win
 
-OBJS := $(addprefix $(OUT)/,install.obj util.obj journal.obj screen.obj ini.obj archive.obj hexpatch.obj regtxn.obj progman.obj)
+OBJS := $(addprefix $(OUT)/,install.obj util.obj journal.obj ui_dos.obj ini.obj archive.obj hexpatch.obj regtxn.obj progman.obj)
 WINOBJS := $(OUT)/wininstall.obj $(OUT)/winutil.obj $(OUT)/winjournal.obj $(OUT)/winini.obj $(OUT)/winregtxn.obj $(OUT)/winreg16.obj $(OUT)/wintasks.obj
 DOSIMAGE := $(OUT)/INSTALL.STB
 DOSPACKED := $(OUT)/INSTALL.PST
@@ -25,7 +25,7 @@ all: $(OUT)/INSTALL.EXE
 $(OUT):
 	mkdir -p $@
 
-$(OUT)/%.obj: src/%.c src/gdi.h src/hexpatch.h | $(OUT)
+$(OUT)/%.obj: src/%.c src/gdi.h src/ui.h src/hexpatch.h | $(OUT)
 	$(CC) $(COPT) -fo=$@ $<
 
 $(DOSIMAGE): $(OBJS)

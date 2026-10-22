@@ -1,4 +1,4 @@
-/* screen.c - text mode user interface of the GeosOne Dual Installer:
+/* ui_dos.c - text mode user interface of the GeosOne Dual Installer:
  * 80x25 color text screen written directly to video memory, windows with a
  * title in the frame and a shadow, buttons, a line editor and a text viewer
  * (the look of the Qualitas MAX installer).
@@ -8,6 +8,7 @@
 #include <string.h>
 #include <i86.h>
 #include "gdi.h"
+#include "ui.h"
 
 #define COLS 80
 #define ROWS 25
@@ -31,7 +32,15 @@ static unsigned short far *vram;
 
 static const char *topleft = "", *topright = "";
 
-void scr_init( void )
+static void scr_cursor( int x, int y );
+static void scr_putn( int x, int y, int attr, const char *s, int n );
+static void scr_fill( int x, int y, int w, int h, int ch, int attr );
+static void scr_keys( const char *keys );
+static int  scr_text( int x, int y, int w, int h, int attr, const char *s, int draw );
+static void itoa_dec( int v, char *s );
+
+
+static void scr_init( void )
 {
 	union REGS r;
 	r.h.ah = 0x0F;
@@ -47,7 +56,7 @@ void scr_init( void )
 	scr_cursor( -1, -1 );
 }
 
-void scr_exit( void )
+static void scr_exit( void )
 {
 	union REGS r;
 	scr_fill( 0, 0, COLS, ROWS, ' ', 0x07 );
@@ -57,7 +66,7 @@ void scr_exit( void )
 	int86( 0x10, &r, &r );
 }
 
-void scr_cursor( int x, int y )
+static void scr_cursor( int x, int y )
 {
 	union REGS r;
 	r.h.ah = 1;
@@ -69,7 +78,7 @@ void scr_cursor( int x, int y )
 	}
 }
 
-int scr_key( void )
+static int scr_key( void )
 {
 	union REGS r;
 	r.h.ah = 0;
@@ -77,25 +86,25 @@ int scr_key( void )
 	return r.h.al ? r.h.al : 0x100 | r.h.ah;   /* 0x1xx: scan code */
 }
 
-void scr_put( int x, int y, int attr, const char *s )
+static void scr_put( int x, int y, int attr, const char *s )
 {
 	for ( ; *s && x < COLS; s++, x++ )
 		vram[y * COLS + x] = ( attr << 8 ) | (unsigned char)*s;
 }
 
-void scr_putn( int x, int y, int attr, const char *s, int n )
+static void scr_putn( int x, int y, int attr, const char *s, int n )
 {
 	for ( ; n > 0 && x < COLS; n--, x++ )
 		vram[y * COLS + x] = ( attr << 8 ) | (unsigned char)( *s ? *s++ : ' ' );
 }
 
-void scr_putnf( int x, int y, int attr, const char __far *s, int n )
+static void scr_putnf( int x, int y, int attr, const char __far *s, int n )
 {
 	for ( ; n > 0 && x < COLS; n--, x++ )
 		vram[y * COLS + x] = ( attr << 8 ) | (unsigned char)( *s ? *s++ : ' ' );
 }
 
-void scr_fill( int x, int y, int w, int h, int ch, int attr )
+static void scr_fill( int x, int y, int w, int h, int ch, int attr )
 {
 	int i, j;
 	for ( j = y; j < y + h && j < ROWS; j++ )
@@ -125,7 +134,7 @@ static void shadow( int x, int y, int w, int h )
 }
 
 /* window with a double line frame, the title in the top line */
-void scr_window( int x, int y, int w, int h, int attr, const char *title )
+static void scr_window( int x, int y, int w, int h, int attr, const char *title )
 {
 	int i, tl = strlen( title );
 	scr_fill( x, y, w, h, ' ', attr );
@@ -149,7 +158,7 @@ void scr_window( int x, int y, int w, int h, int attr, const char *title )
 	shadow( x, y, w, h );
 }
 
-void scr_bars( const char *left, const char *right, const char *keys )
+static void scr_bars( const char *left, const char *right, const char *keys )
 {
 	topleft = left;
 	topright = right;
@@ -161,7 +170,7 @@ void scr_bars( const char *left, const char *right, const char *keys )
 }
 
 /* key bar: "Esc=Abort  Enter=Continue": the key in red */
-void scr_keys( const char *keys )
+static void scr_keys( const char *keys )
 {
 	int x = 1;
 	scr_fill( 0, ROWS - 1, COLS, 1, ' ', A_BOTTOM );
@@ -180,13 +189,13 @@ void scr_keys( const char *keys )
 	}
 }
 
-void scr_desktop( void )
+static void scr_desktop( void )
 {
 	scr_fill( 0, 1, COLS, ROWS - 2, 0xB0, A_DESK );
 }
 
 /* word-wrapped text in a window area; '\n' breaks lines; returns lines */
-int scr_text( int x, int y, int w, int h, int attr, const char *s, int draw )
+static int scr_text( int x, int y, int w, int h, int attr, const char *s, int draw )
 {
 	int line = 0;
 	while ( *s ) {
@@ -210,7 +219,7 @@ int scr_text( int x, int y, int w, int h, int attr, const char *s, int draw )
 
 /* buttons centered in row y; sel = selected; returns the chosen index,
  * -1 for Esc.  Keys: Tab/arrows, Enter, the first letter of a button */
-int scr_buttons( int y, int x, int w, const char **labels, int n, int sel )
+static int scr_buttons( int y, int x, int w, const char **labels, int n, int sel )
 {
 	int i, k, pos[8];
 	for ( ;; ) {
@@ -251,7 +260,7 @@ int scr_buttons( int y, int x, int w, const char **labels, int n, int sel )
 }
 
 /* message window with buttons; returns the chosen button or -1 */
-int scr_message( const char *title, const char *text, const char **buttons, int n, int sel, int error )
+static int scr_message( const char *title, const char *text, const char **buttons, int n, int sel, int error )
 {
 	int w = 60, lines = scr_text( 0, 0, w - 4, 99, 0, text, 0 ), h, x, y;
 	int attr = error ? A_ERROR : A_WIN;
@@ -272,7 +281,7 @@ int scr_message( const char *title, const char *text, const char **buttons, int 
 }
 
 /* line editor in a window; returns 0 = Enter, -1 = Esc */
-int scr_input( const char *title, const char *text, char *buf, int max )
+static int scr_input( const char *title, const char *text, char *buf, int max )
 {
 	int w = 64, lines = scr_text( 0, 0, w - 4, 99, 0, text, 0 );
 	int h = lines + 6, x = ( COLS - w ) / 2, y = ( ROWS - h ) / 2;
@@ -308,7 +317,7 @@ int scr_input( const char *title, const char *text, char *buf, int max )
 }
 
 /* text viewer (license, readme); returns the button chosen or -1 */
-int scr_view( const char *title, ftext *lines, int nlines, const char **buttons, int n, int sel )
+static int scr_view( const char *title, ftext *lines, int nlines, const char **buttons, int n, int sel )
 {
 	int x = 2, y = 2, w = COLS - 4, h = ROWS - 4, top = 0, k, i;
 	int vis = h - 5;
@@ -363,7 +372,7 @@ int scr_view( const char *title, ftext *lines, int nlines, const char **buttons,
 }
 
 /* checkbox list: on[] toggled with Space; returns 0 = Enter, -1 = Esc */
-int scr_checklist( const char *title, const char *text, const char **items, char *on, int n )
+static int scr_checklist( const char *title, const char *text, const char **items, char *on, int n )
 {
 	int w = 64, lines = scr_text( 0, 0, w - 4, 99, 0, text, 0 );
 	int rows = n < ROWS - 9 - lines ? n : ROWS - 9 - lines;   /* more: scroll */
@@ -404,7 +413,7 @@ int scr_checklist( const char *title, const char *text, const char **items, char
 }
 
 /* progress window: call with done = 0 first */
-void scr_progress( const char *title, const char *text, long done, long total )
+static void scr_progress( const char *title, const char *text, long done, long total )
 {
 	int w = 60, h = 7, x = ( COLS - w ) / 2, y = ( ROWS - h ) / 2, bw = w - 6, n;
 	if ( !done )
@@ -416,7 +425,7 @@ void scr_progress( const char *title, const char *text, long done, long total )
 	scr_fill( x + 3, y + 4, n, 1, 0xDB, A_HILITE );
 }
 
-void itoa_dec( int v, char *s )
+static void itoa_dec( int v, char *s )
 {
 	char t[8];
 	int i = 0;
@@ -427,4 +436,55 @@ void itoa_dec( int v, char *s )
 	while ( i )
 		*s++ = t[--i];
 	*s = 0;
+}
+
+/* --- ui.h ---------------------------------------------------------------- */
+
+void ui_init( void )
+{
+	scr_init();
+}
+
+void ui_exit( void )
+{
+	scr_exit();
+}
+
+void ui_title( const char *title, const char *product )
+{
+	scr_bars( title, product, "" );
+}
+
+void ui_clear( void )
+{
+	scr_desktop();
+}
+
+int ui_message( const char *title, const char *text, const char **buttons, int n, int sel, int error )
+{
+	scr_keys( gdi_text( "KeysMsg", "Enter=Select  Esc=Abort" ) );
+	return scr_message( title, text, buttons, n, sel, error );
+}
+
+int ui_input( const char *title, const char *text, char *buf, int max )
+{
+	scr_keys( gdi_text( "KeysInput", "Enter=Continue  Esc=Abort" ) );
+	return scr_input( title, text, buf, max );
+}
+
+int ui_view( const char *title, ftext *lines, int nlines, const char **buttons, int n, int sel )
+{
+	scr_keys( gdi_text( "KeysView", "PgUp=Page up  PgDn=Page down  Enter=Select  Esc=Abort" ) );
+	return scr_view( title, lines, nlines, buttons, n, sel );
+}
+
+int ui_checklist( const char *title, const char *text, const char **items, char *on, int n )
+{
+	scr_keys( gdi_text( "KeysOpt", "Space=On/off  Enter=Continue  Esc=Abort" ) );
+	return scr_checklist( title, text, items, on, n );
+}
+
+void ui_progress( const char *title, const char *text, long done, long total )
+{
+	scr_progress( title, text, done, total );
 }
