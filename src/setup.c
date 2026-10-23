@@ -160,6 +160,7 @@ void use_ini( const char *dir )
 	memset( opt_on, 0, sizeof(opt_on) );
 	memset( opt_value, 0, sizeof(opt_value) );
 	dest[0] = windir[0] = 0;
+	need_asked = 0;
 	dosmode = !stricmp( ini_get( "Setup", "Mode", "" ), "DOS" );
 	if ( !dosmode )
 		find_windows();
@@ -289,6 +290,7 @@ void extras( void )
 	static char dir[80], ini[80], text[200];
 	int i;
 	read_extras();
+	extras_new_system = dosmode;
 	for ( i = 0; i < nextra; i++ ) {
 		if ( !extra_on[i] )
 			continue;
@@ -317,8 +319,10 @@ void extras( void )
 				break;
 		}
 	}
-	if ( stricmp( ini_get( "Setup", "Extras", "no" ), "yes" ) )
+	if ( stricmp( ini_get( "Setup", "Extras", "no" ), "yes" ) ) {
+		extras_new_system = 0;
 		return;
+	}
 	strcpy( dir, ini_get( "Setup", "ExtrasDir", "A:\\" ) );
 	for ( ;; ) {
 		b[0] = T( "InstallMore" );
@@ -341,6 +345,7 @@ void extras( void )
 		}
 		extra_install( dir, NULL, NULL );
 	}
+	extras_new_system = 0;
 }
 
 /* the whole setup of the loaded INI (srcdir, the options of the command

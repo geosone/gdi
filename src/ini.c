@@ -49,28 +49,51 @@ static char *trim( char *s )
 }
 
 /* keep the loaded INI aside while another one is used (the disk with
- * it may be gone); ini_restore() frees the other one and brings it back */
-static char **saved_line;
-static int *saved_sect, saved_n;
+ * it may be gone); ini_restore() frees the other one and brings it back.
+ * The lines wait in far memory: the heap of the DOS installer is in the
+ * data segment, too small for two INI files */
+static char __far * __far *saved_line;
+static int __far *saved_sect;
+static int saved_n;
+
+static void __far *far_alloc( unsigned size )
+{
+	void __far *p = _fmalloc( size ? size : 1 );
+#ifndef __WINDOWS__
+	if ( !p )
+		gdi_out_of_memory();
+#endif
+	return p;
+}
 
 void ini_save( void )
 {
-	saved_line = malloc( nline * sizeof(char *) );
-	saved_sect = malloc( nline * sizeof(int) );
-	memcpy( saved_line, line, nline * sizeof(char *) );
-	memcpy( saved_sect, sect, nline * sizeof(int) );
+	int i;
+	saved_line = far_alloc( nline * sizeof(char __far *) );
+	saved_sect = far_alloc( nline * sizeof(int) );
+	for ( i = 0; i < nline; i++ ) {
+		saved_line[i] = far_alloc( strlen( line[i] ) + 1 );
+		_fstrcpy( saved_line[i], line[i] );
+		saved_sect[i] = sect[i];
+	}
 	saved_n = nline;
-	nline = 0;
+	ini_free();
 }
 
 void ini_restore( void )
 {
+	char buf[512];   /* as long as the lines of ini_load() */
+	int i;
 	ini_free();
-	memcpy( line, saved_line, saved_n * sizeof(char *) );
-	memcpy( sect, saved_sect, saved_n * sizeof(int) );
+	for ( i = 0; i < saved_n; i++ ) {
+		_fstrcpy( (char __far *)buf, saved_line[i] );
+		_ffree( saved_line[i] );
+		line[i] = str_dup( buf );
+		sect[i] = saved_sect[i];
+	}
 	nline = saved_n;
-	free( saved_line );
-	free( saved_sect );
+	_ffree( saved_line );
+	_ffree( saved_sect );
 }
 
 /* forget the loaded INI (to load another one) */

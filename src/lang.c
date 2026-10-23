@@ -119,8 +119,11 @@ const char *gdi_text( const char *key )
 			if ( cache[i] )
 				return cache[i];
 			t = gdi_text_of[language][i] ? gdi_text_of[language][i] : gdi_text_of[0][i];
-			if ( ( cache[i] = malloc( _fstrlen( t ) + 1 ) ) == NULL )
-				return key;
+			if ( ( cache[i] = malloc( _fstrlen( t ) + 1 ) ) == NULL ) {
+				static char spare[120];   /* the heap is full: "NoMemory" */
+				_fstrncpy( (char __far *)spare, t, sizeof(spare) - 1 );
+				return spare;
+			}
 			_fstrcpy( (char __far *)cache[i], t );
 #ifdef __WINDOWS__
 			if ( !ini_keep_oem )   /* the frontend: INSTALL.INI in ANSI */

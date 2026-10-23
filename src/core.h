@@ -56,6 +56,8 @@ extern int completion_registered;
 extern jmp_buf extra_abort;            /* an extra installation was cancelled */
 extern int in_batch;                   /* a package of [Installer] */
 extern int in_extra;                   /* INSTALL.LOG: installed files */
+extern int extras_new_system;          /* [Extras] of a DOS mode setup: for the new system */
+extern int need_asked;                 /* Need= false, installed anyway (extras_new_system) */
 extern char selected_language[9];
 
 /* a text of the installer (lang.c) */

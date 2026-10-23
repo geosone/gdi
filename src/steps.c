@@ -552,16 +552,31 @@ static unsigned version_number( const char *v )
 }
 
 /* [Setup] Need=condition|message: the setup stops with the message when
- * the condition is false, e.g. Need=?MEMMGR|... with a [Detect] program */
+ * the condition is false, e.g. Need=?MEMMGR|... with a [Detect] program.
+ * An [Extras] package of a DOS mode setup is for the new system, which
+ * does not run yet (its CONFIG.SYS is not loaded): there the user chooses */
+int extras_new_system, need_asked;
+
 void check_needs( void )
 {
 	const char *v, *bar;
-	char text[200];
+	char text[400];
 	int pos = 0;
 	while ( ( pos = ini_next( "Setup", "Need", pos, &v ) ) >= 0 )
 		if ( ( bar = strchr( v, '|' ) ) != NULL && cond( v ) == NULL ) {
-			expand( text, bar + 1, sizeof(text) );
-			fail( text );
+			expand( text, bar + 1, sizeof(text) - 160 );
+			if ( !extras_new_system )
+				fail( text );
+			if ( !need_asked ) {
+				static const char *b[2];
+				b[0] = T( "InstallAnyway" );
+				b[1] = T( "Skip" );
+				strcat( text, "\n\n" );
+				strcat( text, T( "NeedNewSystem" ) );
+				if ( ui_message( T( "ExtrasTitle" ), text, b, 2, 0, 1 ) != 0 )
+					longjmp( extra_abort, 1 );
+				need_asked = 1;
+			}
 		}
 }
 
