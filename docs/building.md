@@ -45,6 +45,7 @@ registry (`REG.DAT`) logically.
 | `INI=test/TESTINI.INI WINDOWS=1 INIFILES=1 TARGET=TESTINI KEYS="ret ret ret ret ret" test/run.sh` | `[Ini] Set=` and `[System.ini] Change=` (add `UNINST=1` for reverse) |
 | `PKG=test/newer TARGET=NEWTEST NEWER=1 KEYS="ret ret ret ret" test/run.sh` | `[Newer]`, plain and from an archive (add `UNINST=1` for reverse) |
 | `SILENT=1 TARGET=SILENT test/run.sh` | `INSTALL /S:` with an answer file |
+| `INI=test/TESTPROG.INI SILENT=1 TARGET=SILENT PROGRAM=1 test/run.sh` | `[Autoexec.bat] Program=`: `LH MSCDEX` becomes SHSUCDX of `[Find]` (add `UNINST=1 UNKEYS="r ret"` for reverse) |
 | `CHECK=1 test/run.sh` | `INSTALL /CHECK` in DOS |
 | `FRONTEND=1 SILENT=1 test/win3x.sh`, `FRONTEND=1 MANAGE=1 test/win3x.sh` | `INSTALL /S` and `INSTALL /M` under Windows |
 | `PKG=dir TARGET=NAME test/run.sh` | the distribution in `dir` (its `INSTALL.INI`), target `A:\NAME` |

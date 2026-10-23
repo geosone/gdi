@@ -728,7 +728,7 @@ int confirm( void )
 int find_used( const char *name )
 {
 	static const char *sect[] = { "Config.sys", "Autoexec.bat", "System.ini" };
-	static const char *keys[] = { "Add", "Extend" };
+	static const char *keys[] = { "Add", "Extend", "Program" };
 	static const char *patch_keys[] = { "Patch", "PatchIfPresent",
 		"PatchVariant" };
 	char var[20];
@@ -736,7 +736,7 @@ int find_used( const char *name )
 	int s, k, pos;
 	sprintf( var, "%%%s%%", name );
 	for ( s = 0; s < 3; s++ )
-		for ( k = 0; k < 2; k++ )
+		for ( k = 0; k < 3; k++ )
 			for ( pos = 0; ( pos = ini_next( sect[s], keys[k], pos, &v ) ) >= 0; )
 				if ( ( t = cond( v ) ) != NULL && contains( t, var ) )
 					return 1;

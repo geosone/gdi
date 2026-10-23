@@ -35,7 +35,7 @@ Option=?TAPE|Install the tape driver           ; detected default
 Option=!?WIN9X|Install the DOS-only component  ; inverted detected default
 
 [Find]                          ; programs already installed: %NAME% = path
-CDEX=SHSUCDX.COM SHSUCDX.EXE MSCDEX.EXE
+CDEX=SHSUCDX.COM SHSUCDX.EXE MSCDEX.EXE NWCDEX.EXE   ; the first one found
 ASPICD=ASPICD.SYS
 
 [Detect]                        ; arbitrary package programs, not built into GDI
@@ -195,7 +195,9 @@ are expanded in the command line.
 file found there is installed to `%DIR%` with the other files (only if an
 active line uses its `%NAME%`) and removed again by `INSTALL /U`. So a
 distributor can put e.g. `ASPICD.SYS`, `ASPIDISK.SYS` or `MKELS120.SYS` on
-the disk. Otherwise it searches the computer: `%BOOT%\DOS`, the `PATH`, the
+the disk. Otherwise it searches the computer; in both places the names are
+tried in their order (above: SHSUCDX before MSCDEX, before NWCDEX of
+DR-DOS). The computer: `%BOOT%\DOS`, the `PATH`, the
 Windows directory and its `COMMAND`, `%BOOT%\` and the paths named in
 `CONFIG.SYS` and `AUTOEXEC.BAT`.
 

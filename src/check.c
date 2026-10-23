@@ -74,7 +74,7 @@ static const char *setup_keys[] = {
 };
 static const char *options_keys[] = { "Option", NULL };
 static const char *run_keys[] = { "Before", "After", "Windows", "Uninstall", NULL };
-static const char *dos_keys[] = { "Remove", "Add", "Position", "Extend", "Replace", "PathAppend", "PathRemove", NULL };
+static const char *dos_keys[] = { "Remove", "Add", "Position", "Extend", "Replace", "PathAppend", "PathRemove", "Program", NULL };
 static const char *system_keys[] = { "Remove", "Add", "Set", "Change", "Replace", NULL };
 static const char *set_keys[] = { "Set", NULL };
 static const char *progman_keys[] = { "Item", NULL };

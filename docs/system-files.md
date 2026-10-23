@@ -15,7 +15,8 @@ Position=bottom                 ; top or bottom (default: bottom)
 
 [Autoexec.bat]
 Add=...                         ; default position: top (after @ECHO OFF)
-Extend=5,?CDEX|MSCDEX,SHSUCDX| /D:ASPICD0|%CDEX% /D:ASPICD0
+Program=5,?SHSUCDX|MSCDEX,NWCDEX|%SHSUCDX%   ; SHSUCDX instead of MSCDEX/NWCDEX
+Extend=5,?CDEX|MSCDEX,NWCDEX,SHSUCDX| /D:ASPICD0|%CDEX% /D:ASPICD0
 PathAppend=3|%DIR%              ; %DIR% in the PATH (option 3)
 PathRemove=%BOOT%\AHCIASPI;%BOOT%\EZSCSI   ; out of the PATH (older versions)
 Replace=yes                     ; write a new file (the old one is kept as backup)
@@ -27,6 +28,15 @@ Replace=yes                     ; write a new file (the old one is kept as backu
 - `Extend=condition|programs|text|new line` appends the text to the first
   line that starts one of the programs, or adds the new line when there is
   none (above: `/D:ASPICD0` for MSCDEX or SHSUCDX).
+- `Program=condition|programs|new program` makes the lines that start one
+  of the programs (by name, with any path and extension; also after `LH` or
+  `LOADHIGH` and their switches) start the new program, with the rest of the
+  line unchanged: above, `MSCDEX /D:MSCD001 /M:10` becomes
+  `C:\OPENASPI\SHSUCDX.COM /D:MSCD001 /M:10` (SHSUCDX ignores the MSCDEX
+  options it doesn't have). An `LH` goes as well (SHSUCDX loads itself
+  high). The list may name the new program too: another copy of it (an
+  older SHSUCDX in `C:\DOS`) is replaced as well. It runs before `Extend=`,
+  so that the text is appended to that line. `INSTALL /U` puts the old program back (`AUTOEXEC.PRG`).
 - `PathAppend=condition|directory` puts the directory into the `PATH`, so
   that the programs of the package start from any directory (DOS, and the
   DOS boxes of Windows 3.x and 9x): it is appended to the last line that
@@ -47,7 +57,7 @@ Replace=yes                     ; write a new file (the old one is kept as backu
 - `CONFIG.SYS` with a `[menu]` (multi-configuration): lines go into the
   `[common]` block, which is created if needed.
 - `AUTOEXEC.BAT` with position `bottom`: lines go before a line that starts
-  Windows (`WIN`).
+  Windows (`WIN`, also `C:\WINDOWS\WIN.COM /3 APP.EXE`).
 
 **Backups:** the original files are kept as `CONFIG.G01`, `AUTOEXEC.G01`;
 further runs write `.G02` and so on.

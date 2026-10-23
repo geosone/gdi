@@ -313,6 +313,127 @@ static void ed_unpath( void )
 	}
 }
 
+/* the program a DOS line starts (after @, LH or LOADHIGH and its switches):
+ * the offset of its first character, and of the character after it */
+static int line_program( const char *s, int *end )
+{
+	int a = 0, e;
+	while ( s[a] == ' ' || s[a] == '\t' || s[a] == '@' )
+		a++;
+	if ( ( !strnicmp( s + a, "LH", 2 ) && ( s[a + 2] == ' ' || s[a + 2] == '\t' ) ) ||
+		( !strnicmp( s + a, "LOADHIGH", 8 ) && ( s[a + 8] == ' ' || s[a + 8] == '\t' ) ) ) {
+		while ( s[a] && s[a] != ' ' && s[a] != '\t' )
+			a++;
+		for ( ;; ) {   /* LH /L:1,2 /S */
+			while ( s[a] == ' ' || s[a] == '\t' )
+				a++;
+			if ( s[a] != '/' )
+				break;
+			while ( s[a] && s[a] != ' ' && s[a] != '\t' )
+				a++;
+		}
+	}
+	for ( e = a; s[e] && s[e] != ' ' && s[e] != '\t' && s[e] != '/'; e++ )
+		;
+	*end = e;
+	return a;
+}
+
+/* the name of the program at s (n characters) without path and extension
+ * is one of the comma separated names of list */
+static int program_is( const char *s, int n, const char *list )
+{
+	int b = n, x;
+	while ( b > 0 && s[b - 1] != '\\' && s[b - 1] != ':' )
+		b--;
+	for ( x = b; x < n && s[x] != '.'; x++ )
+		;
+	while ( *list ) {
+		int l = 0, m;
+		while ( list[l] && list[l] != ',' )
+			l++;
+		for ( m = 0; m < l && list[m] != '.'; m++ )
+			;
+		if ( m && m == x - b && !strnicmp( s + b, list, m ) )
+			return 1;
+		list += l;
+		if ( *list )
+			list++;
+	}
+	return 0;
+}
+
+/* Program=condition|programs|new program: the lines that start one of the
+ * programs start the new one (the rest of the line stays); the list may name
+ * the new program too (another copy of it is replaced). AUTOEXEC.PRG
+ * keeps "new|old" (old: from LH on) for INSTALL /U. */
+static void ed_program( const char *section )
+{
+	const char *v, *t;
+	char list[256], prog[256], line[256], journal[80];
+	int pos = 0, i, a, e;
+	FILE *f = NULL;
+	path_cat( journal, jdir, "AUTOEXEC.PRG" );
+	while ( ( pos = ini_next( section, "Program", pos, &v ) ) >= 0 ) {
+		const char *b;
+		if ( !( t = cond_new( section, "Program", v ) ) || !( b = strchr( t, '|' ) ) )
+			continue;
+		sprintf( list, "%.*s", (int)( b - t ), t );
+		expand( prog, b + 1, sizeof(prog) );
+		for ( i = 0; i < ned; i++ ) {
+			a = line_program( ed[i], &e );
+			if ( is_rem( ed[i] ) || !program_is( ed[i] + a, e - a, list ) ||
+				( e - a == (int)strlen( prog ) && !strnicmp( ed[i] + a, prog, e - a ) ) ||
+				strlen( ed[i] ) + strlen( prog ) >= sizeof(line) )
+				continue;
+			/* from LH on: LH SHSUCDX would relocate low, SHSUCDX goes high */
+			for ( a = 0; ed[i][a] == ' ' || ed[i][a] == '\t' || ed[i][a] == '@'; a++ )
+				;
+			if ( !f && !( f = fopen( journal, "a" ) ) ) {
+				char msg[120];
+				sprintf( msg, "%s %s", T( "WriteError" ), journal );
+				fail( msg );
+			}
+			fprintf( f, "%s|%.*s\n", prog, e - a, ed[i] + a );
+			sprintf( line, "%.*s%s%s", a, ed[i], prog, ed[i] + e );
+			free( ed[i] );
+			ed[i] = str_dup( line );
+		}
+	}
+	if ( f )
+		fclose( f );
+}
+
+/* INSTALL /U: the programs Program= replaced come back */
+static void ed_unprogram( void )
+{
+	char journal[80], l[256], line[256], *old;
+	FILE *f;
+	int i, a, e, n;
+	path_cat( journal, jdir, "AUTOEXEC.PRG" );
+	if ( !( f = fopen( journal, "r" ) ) )
+		return;
+	while ( fgets( l, sizeof(l), f ) ) {
+		strip_eol( l );
+		if ( !( old = strchr( l, '|' ) ) )
+			continue;
+		*old++ = 0;
+		n = strlen( l );
+		for ( i = 0; i < ned; i++ ) {
+			a = line_program( ed[i], &e );
+			if ( e - a == n && !strnicmp( ed[i] + a, l, n ) &&
+				strlen( ed[i] ) + strlen( old ) < sizeof(line) ) {
+				sprintf( line, "%.*s%s%s", a, ed[i], old, ed[i] + e );
+				free( ed[i] );
+				ed[i] = str_dup( line );
+				break;
+			}
+		}
+	}
+	fclose( f );
+	remove( journal );
+}
+
 /* INSTALL /U: take the text out again; a line added by Extend goes */
 static void ed_unextend( const char *section )
 {
@@ -433,6 +554,8 @@ static void ed_add_dos( const char *section, int isconfig )
 	int pos = 0, at, top = !stricmp( ini_get( section, "Position", isconfig ? "bottom" : "top" ), "top" ), i;
 	int menu = 0, common = -1;
 
+	if ( !isconfig )
+		ed_program( section );   /* before Extend= looks for the program */
 	if ( isconfig ) {
 		for ( i = 0; i < ned; i++ ) {
 			if ( !strnicmp( ed[i], "[menu]", 6 ) )
@@ -457,14 +580,10 @@ static void ed_add_dos( const char *section, int isconfig )
 			at++;
 	} else {
 		at = ned;
-		if ( !isconfig )
+		if ( !isconfig )   /* the program, not an argument (WIN C:\APP.EXE) */
 			for ( i = 0; i < ned; i++ ) {
-				const char *s = ed[i], *b;
-				while ( *s == ' ' || *s == '@' )
-					s++;
-				b = strrchr( s, '\\' );
-				b = b ? b + 1 : s;
-				if ( ( !strnicmp( b, "WIN", 3 ) && ( !b[3] || b[3] == ' ' || b[3] == '.' ) ) ) {
+				int e, a = line_program( ed[i], &e );
+				if ( !is_rem( ed[i] ) && program_is( ed[i] + a, e - a, "WIN" ) ) {
 					at = i;
 					break;
 				}
@@ -1353,7 +1472,7 @@ void edit_file( const char *path, const char *section, int kind )
 	}
 	if ( !has_active( section, "Add" ) && !has_active( section, "Remove" ) &&
 		!has_active( section, "Extend" ) && !has_active( section, "PathAppend" ) &&
-		!has_active( section, "PathRemove" ) &&
+		!has_active( section, "PathRemove" ) && !has_active( section, "Program" ) &&
 		!( kind == 2 && has_active( section, "Change" ) ) &&
 		!( kind >= 2 && ( has_active( section, "Set" ) ||
 			set_journal_exists ) ) )
@@ -1377,6 +1496,8 @@ void edit_file( const char *path, const char *section, int kind )
 			ed_unextend( section );
 		if ( kind == 1 )
 			ed_unpath();
+		if ( kind == 1 && uninstall )
+			ed_unprogram();
 	}
 	if ( !uninstall ) {
 		if ( kind == 2 ) {

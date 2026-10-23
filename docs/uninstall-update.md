@@ -26,6 +26,7 @@ All of them are in the target directory (`%DIR%`):
 |---|---|
 | `INSTALL.LOG` | the installed files; `path|backup` for a replaced file |
 | `DIRS.LOG` | the first parent directory Setup created for `%DIR%` |
+| `AUTOEXEC.PRG` | the programs `Program=` replaced in `AUTOEXEC.BAT` (`new|old`) |
 | `SYSTEM.ADD` | the lines added to `SYSTEM.INI` |
 | `SYSTEM.CHG` | the lines of `SYSTEM.INI` replaced (`Change=`) |
 | `SYSTEM.SET`, `WIN.SET` | the previous lines of the values set in `SYSTEM.INI`, `WIN.INI` |

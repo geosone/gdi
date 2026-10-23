@@ -22,6 +22,9 @@
 #                       [Setup] Need=: a false condition stops the setup
 #                       (NEED=pass: without the false one it installs;
 #                       NEED=pass UNINST=1: [Run] Uninstall=)
+#   INI=test/TESTPROG.INI SILENT=1 TARGET=SILENT PROGRAM=1 [UNINST=1 UNKEYS="r ret"] test/run.sh
+#                       [Autoexec.bat] Program=: MSCDEX -> SHSUCDX and back;
+#                       lines before WIN, also with arguments with "\"
 #   PKG=test/extras ONEEXE=1 EXTRAS=1 TARGET=MAIN TIMEOUT=15 KEYS=... test/run.sh
 #                       [Extras]: A installed from its directory, B skipped
 #                       (EXTRAS=none: A unticked in the list, B skipped)
@@ -61,6 +64,7 @@ else
     printf '[Language]\r\nSelected=en\r\n[Keep]\r\nValue=preserved\r\n' > "$OUT/src/SETTINGS.INI"
     printf 'TESTVXD test VxD\r\n' > "$OUT/src/TESTVXD.386"
 fi
+[ -n "${PROGRAM:-}" ] && printf '\xcd\x20' > "$OUT/src/SHSUCDX.COM"
 if [ -n "${NEED:-}" ]; then   # MARK.COM: creates A:\UNRUN.TXT ([Run] Uninstall=)
     printf 'org 100h\nmov ah,3Ch\nxor cx,cx\nmov dx,n\nint 21h\nmov bx,ax\nmov ah,3Eh\nint 21h\nint 20h\nn db "A:\\UNRUN.TXT",0\n' > "$OUT/mark.asm"
     nasm -f bin -o "$OUT/src/MARK.COM" "$OUT/mark.asm" || exit 1
@@ -108,7 +112,10 @@ fi
 { echo '@ECHO OFF'
   # SetupDir: PathAppend= and PathRemove= change this line
   [ -n "${SETUPDIR:-}" ] && echo 'PATH A:\DOS;A:\OLDA;A:\TOOLS'
-  echo 'A:\SRC\RUN.BAT'; } | crlf > "$OUT/AUTOEXEC.BAT"
+  echo 'A:\SRC\RUN.BAT'
+  # Program=: (not run, RUN.BAT doesn't come back)
+  [ -n "${PROGRAM:-}" ] && { echo 'LH /L:0 A:\DOS\MSCDEX.EXE /D:MSCD001 /M:10'; echo 'REM MSCDEX.EXE stays'; echo 'WIN A:\X\APP.EXE'; }
+  } | crlf > "$OUT/AUTOEXEC.BAT"
 P="$OUT/boot.img"
 mmd -i "$P" ::/SRC 2>/dev/null
 mcopy -s -o -i "$P" "$OUT"/src/* ::/SRC/ && mcopy -o -i "$P" "$OUT/CONFIG.SYS" "$OUT/AUTOEXEC.BAT" ::/ || exit 1
@@ -152,6 +159,27 @@ if [ -n "${LANGUAGE:-}" ]; then
     mcopy -o -i "$P" ::/TESTLANG/SETTINGS.INI "$OUT/LANGUAGE.INI"
     python3 -c 'import configparser,sys; c=configparser.ConfigParser(); c.read(sys.argv[1]); assert c["Language"]["Selected"] == "de"; assert c["Keep"]["Value"] == "preserved"' "$OUT/LANGUAGE.INI" || exit 1
     echo "DOS language selection integration passed"
+fi
+if [ -n "${PROGRAM:-}" ]; then
+    python3 - "$OUT/serial.log" "${UNINST:-}" <<'PYEOF' || exit 1
+import sys
+t = open(sys.argv[1], 'rb').read().decode('latin-1').replace('\r', '')
+a = t.split("=== AUTOEXEC.BAT")[-1].split("=== TARGET")[0].strip().split('\n')
+want = ['@ECHO OFF', 'A:\\SRC\\RUN.BAT', 'LH /L:0 A:\\DOS\\MSCDEX.EXE /D:MSCD001 /M:10',
+        'REM MSCDEX.EXE stays', 'WIN A:\\X\\APP.EXE']
+if not sys.argv[2]:
+    want[2] = 'A:\\SILENT\\SHSUCDX.COM /D:MSCD001 /M:10 /D:TESTCD0'
+    want.insert(4, 'REM ADDED')
+assert [l.strip() for l in a] == want, ("AUTOEXEC.BAT", a, want)
+PYEOF
+    # the [Find] file only Program= uses comes from the disk (and goes again)
+    if [ -z "${UNINST:-}" ]; then
+        mdir -i "$P" ::/SILENT/SHSUCDX.COM >/dev/null 2>&1 || { echo "SHSUCDX.COM not installed"; exit 1; }
+    else
+        mdir -i "$P" ::/SILENT/SHSUCDX.COM >/dev/null 2>&1 && { echo "SHSUCDX.COM left"; exit 1; }
+    fi
+    echo "DOS [Autoexec.bat] Program= integration passed${UNINST:+ (INSTALL /U)}"
+    exit 0
 fi
 if [ "${NEED:-}" = fail ]; then   # stopped before anything was installed
     mdir -i "$P" "::/$TARGET" >/dev/null 2>&1 && { echo "installed despite Need="; exit 1; }
