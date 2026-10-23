@@ -31,6 +31,9 @@
 #   PKG=test/setupdir ONEEXE=1 SETUPDIR=1 TARGET=SHARED TIMEOUT=15 KEYS=... test/run.sh
 #                       two packages in A:\SHARED, each with its own setup
 #                       directory: A removed with /U, then B with /M
+#   MOUSEDRV=dir KEYS="click:col,row ..." test/run.sh   MOUSE.EXE (and
+#                       MOUSE.LAN) of dir loaded first; click:col,row moves
+#                       the PS/2 mouse to that cell and clicks
 # Environment: BOOTIMG (DOS boot floppy), INI, KEYS, TIMEOUT
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -65,6 +68,7 @@ else
     printf 'TESTVXD test VxD\r\n' > "$OUT/src/TESTVXD.386"
 fi
 [ -n "${PROGRAM:-}" ] && printf '\xcd\x20' > "$OUT/src/SHSUCDX.COM"
+[ -n "${MOUSEDRV:-}" ] && cp "$MOUSEDRV"/MOUSE.* "$OUT/src/"
 if [ -n "${NEED:-}" ]; then   # MARK.COM: creates A:\UNRUN.TXT ([Run] Uninstall=)
     printf 'org 100h\nmov ah,3Ch\nxor cx,cx\nmov dx,n\nint 21h\nmov bx,ax\nmov ah,3Eh\nint 21h\nint 20h\nn db "A:\\UNRUN.TXT",0\n' > "$OUT/mark.asm"
     nasm -f bin -o "$OUT/src/MARK.COM" "$OUT/mark.asm" || exit 1
@@ -80,6 +84,7 @@ fi
 # the steps run in RUN.BAT: INSTALL changes AUTOEXEC.BAT while it runs
 {
     echo '@ECHO OFF'
+    [ -n "${MOUSEDRV:-}" ] && { echo 'SET MSINPUT=A:\SRC'; echo 'A:\SRC\MOUSE.EXE'; }
     if [ -n "${CHECK:-}" ]; then
         echo 'A:\SRC\INSTALL.EXE /CHECK > AUX'
     else
@@ -148,7 +153,22 @@ KEYS=${KEYS:-$DEFAULT_KEYS}
 [ -n "${UNINST:-}" ] && KEYS="$KEYS ${UNKEYS:-r}"
 {
     sleep ${START:-8}; n=0
-    for k in $KEYS; do n=$((n+1)); echo "screendump $OUT/s$n.ppm"; sleep 1; echo "sendkey $k"; sleep 2; done
+    for k in $KEYS; do
+        n=$((n+1)); echo "screendump $OUT/s$n.ppm"; sleep 1
+        case $k in
+        click:*)   # to the top left corner, then in small steps (no
+                   # acceleration): 8 counts a column, 16 a row
+            c=${k#click:}; x=$(( ${c%,*} * 8 + 4 )); y=$(( ${c#*,} * 16 + 8 ))
+            for i in 1 2 3 4 5 6 7 8 9 10; do echo "mouse_move -127 -127"; sleep 0.05; done
+            while [ $x -gt 0 ] || [ $y -gt 0 ]; do
+                dx=$(( x > 4 ? 4 : x )); dy=$(( y > 4 ? 4 : y )); x=$((x-dx)); y=$((y-dy))
+                echo "mouse_move $dx $dy"; sleep 0.03
+            done
+            sleep 0.3; echo "mouse_button 1"; sleep 0.2; echo "mouse_button 0" ;;
+        *) echo "sendkey $k" ;;
+        esac
+        sleep 2
+    done
     sleep ${TIMEOUT:-10}; echo "screendump $OUT/end.ppm"; sleep 1; echo quit
 } | qemu-system-i386 -machine pc -accel kvm -m 16 -display none -vga std -monitor stdio \
     -drive if=floppy,format=raw,file="$P" -boot a -nic none -serial file:"$OUT/serial.log" \

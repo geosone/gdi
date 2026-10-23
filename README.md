@@ -3,6 +3,8 @@
 The GeosOne Dual Installer (GDI) is a single dual-mode `INSTALL.EXE` for DOS
 programs, drivers and Windows 3.x software. Under DOS its MZ part runs a text installer in the style of the
 Qualitas MAX (386MAX) setup: a title bar, cyan dialog windows and a key bar.
+With a DOS mouse driver (INT 33h) the buttons, the rows of option lists
+and the keys of the key bar can be clicked as well.
 Windows 3.1x and 95/98/ME load the native Win16 frontend from the same file.
 Both read the same `INSTALL.INI`.
 

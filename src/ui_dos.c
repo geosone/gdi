@@ -1,11 +1,13 @@
 /* ui_dos.c - text mode user interface of the GeosOne Dual Installer:
  * 80x25 color text screen written directly to video memory, windows with a
  * title in the frame and a shadow, buttons, a line editor and a text viewer
- * (the look of the Qualitas MAX installer).
+ * (the look of the Qualitas MAX installer).  With a mouse driver (INT 33h)
+ * buttons, list rows and the keys of the key bar can be clicked.
  *
  * Copyright (C) 2026 GeosOne.  GNU General Public License version 3. */
 
 #include <string.h>
+#include <dos.h>
 #include <i86.h>
 #include "gdi.h"
 #include "ui.h"
@@ -32,6 +34,20 @@ static unsigned short far *vram;
 
 static const char *topleft = "", *topright = "";
 
+/* the mouse: scr_key returns K_CLICK for a left click at mx, my (cells) */
+#define K_CLICK 0x200
+static int mouse, mx, my;
+
+/* the keys of the key bar, for clicks: columns x0..x1-1; key2 for the
+ * right half (one entry for two keys: "Bild auf/ab") */
+static struct { int x0, x1, key, key2; } hot[8];
+static int nhot;
+static const struct { const char *name; int key, key2; } keynames[] = {
+	{ "Enter", 13, 0 }, { "Eingabe", 13, 0 }, { "Esc", 27, 0 },
+	{ "Space", ' ', 0 }, { "Leertaste", ' ', 0 },
+	{ "PgUp", 0x149, 0 }, { "PgDn", 0x151, 0 }, { "Bild auf/ab", 0x149, 0x151 }
+};
+
 static void scr_cursor( int x, int y );
 static void scr_putn( int x, int y, int attr, const char *s, int n );
 static void scr_fill( int x, int y, int w, int h, int ch, int attr );
@@ -54,6 +70,15 @@ static void scr_init( void )
 	r.h.bl = 0;
 	int86( 0x10, &r, &r );
 	scr_cursor( -1, -1 );
+	mouse = 0;   /* a mouse driver: INT 33h set and not just IRET */
+	{
+		unsigned char __far *v = (unsigned char __far *)_dos_getvect( 0x33 );
+		if ( v && *v != 0xCF ) {
+			r.x.ax = 0;   /* reset: the cursor is hidden, cells of 8x8 */
+			int86( 0x33, &r, &r );
+			mouse = r.x.ax == 0xFFFF;
+		}
+	}
 }
 
 static void scr_exit( void )
@@ -78,9 +103,55 @@ static void scr_cursor( int x, int y )
 	}
 }
 
+static void mouse_call( int ax )
+{
+	union REGS r;
+	r.x.ax = ax;
+	r.x.bx = 0;
+	int86( 0x33, &r, &r );
+}
+
+/* a key, or K_CLICK; the mouse cursor is shown only while waiting, because
+ * everything is written straight to video memory.  A click on the key bar
+ * gives the key there */
 static int scr_key( void )
 {
 	union REGS r;
+	union REGPACK p;
+	if ( mouse ) {
+		mouse_call( 5 );   /* forget old clicks */
+		mouse_call( 1 );
+	}
+	for ( ;; ) {
+		memset( &p, 0, sizeof( p ) );
+		p.h.ah = 1;
+		intr( 0x16, &p );
+		if ( !( p.w.flags & INTR_ZF ) )
+			break;
+		if ( mouse ) {
+			r.x.ax = 5;   /* presses of the left button since the last call */
+			r.x.bx = 0;
+			int86( 0x33, &r, &r );
+			if ( r.x.bx ) {
+				int i;
+				mx = r.x.cx / 8;
+				my = r.x.dx / 8;
+				if ( my != ROWS - 1 ) {
+					mouse_call( 2 );
+					return K_CLICK;
+				}
+				for ( i = 0; i < nhot; i++ )
+					if ( mx >= hot[i].x0 && mx < hot[i].x1 ) {
+						mouse_call( 2 );
+						return hot[i].key2 && mx >= ( hot[i].x0 + hot[i].x1 ) / 2 ? hot[i].key2 : hot[i].key;
+					}
+			}
+		}
+		r.x.ax = 0x1680;   /* idle: give the time slice away */
+		int86( 0x2F, &r, &r );
+	}
+	if ( mouse )
+		mouse_call( 2 );
 	r.h.ah = 0;
 	int86( 0x16, &r, &r );
 	return r.h.al ? r.h.al : 0x100 | r.h.ah;   /* 0x1xx: scan code */
@@ -172,10 +243,12 @@ static void scr_bars( const char *left, const char *right, const char *keys )
 /* key bar: "Esc=Abort  Enter=Continue": the key in red */
 static void scr_keys( const char *keys )
 {
-	int x = 1;
+	int x = 1, i;
 	scr_fill( 0, ROWS - 1, COLS, 1, ' ', A_BOTTOM );
+	nhot = 0;
 	while ( *keys && x < COLS ) {
 		const char *eq = strchr( keys, '=' ), *sp;
+		int x0 = x;
 		if ( !eq )
 			break;
 		sp = strstr( eq, "  " );
@@ -184,7 +257,16 @@ static void scr_keys( const char *keys )
 		scr_putn( x, ROWS - 1, A_BOTTOM, eq + 1, sp - eq - 1 );
 		x += sp - eq - 1 + 1;
 		scr_putn( x, ROWS - 1, A_BOTKEY, keys, eq - keys );
-		x += eq - keys + 3;
+		x += eq - keys;
+		for ( i = 0; i < (int)( sizeof( keynames ) / sizeof( keynames[0] ) ) && nhot < 8; i++ )
+			if ( strlen( keynames[i].name ) == (unsigned)( eq - keys ) && !memcmp( keynames[i].name, keys, eq - keys ) ) {
+				hot[nhot].x0 = x0;
+				hot[nhot].x1 = x;
+				hot[nhot].key = keynames[i].key;
+				hot[nhot++].key2 = keynames[i].key2;
+				break;
+			}
+		x += 3;
 		keys = *sp ? sp + 2 : sp;
 	}
 }
@@ -217,11 +299,30 @@ static int scr_text( int x, int y, int w, int h, int attr, const char *s, int dr
 	return line;
 }
 
+/* the button at the click (buttons centered in row y, as drawn by
+ * scr_buttons and scr_view) or -1 */
+static int button_hit( int y, int x, int w, const char **labels, int n )
+{
+	int i, total = 0, cx;
+	if ( my != y )
+		return -1;
+	for ( i = 0; i < n; i++ )
+		total += strlen( labels[i] ) + 6;
+	cx = x + ( w - total + 2 ) / 2;
+	for ( i = 0; i < n; i++ ) {
+		int l = strlen( labels[i] );
+		if ( mx >= cx && mx < cx + l + 4 )
+			return i;
+		cx += l + 6;
+	}
+	return -1;
+}
+
 /* buttons centered in row y; sel = selected; returns the chosen index,
  * -1 for Esc.  Keys: Tab/arrows, Enter, the first letter of a button */
 static int scr_buttons( int y, int x, int w, const char **labels, int n, int sel )
 {
-	int i, k, pos[8];
+	int i, k;
 	for ( ;; ) {
 		int total = 0, cx;
 		for ( i = 0; i < n; i++ )
@@ -230,7 +331,6 @@ static int scr_buttons( int y, int x, int w, const char **labels, int n, int sel
 		for ( i = 0; i < n; i++ ) {
 			char b[40];
 			int l = strlen( labels[i] );
-			pos[i] = cx;
 			b[0] = ' ';
 			b[1] = i == sel ? 0xAE : ' ';
 			memcpy( b + 2, labels[i], l );
@@ -242,8 +342,9 @@ static int scr_buttons( int y, int x, int w, const char **labels, int n, int sel
 			vram[y * COLS + cx + l + 4] = ( ( vram[y * COLS + cx + l + 4] & 0xF000 ) ) | 0xDC;
 			cx += l + 4 + 2;
 		}
-		(void)pos;
 		k = scr_key();
+		if ( k == K_CLICK && ( i = button_hit( y, x, w, labels, n ) ) >= 0 )
+			return i;
 		if ( k == 27 )
 			return -1;
 		if ( k == 13 )
@@ -350,6 +451,12 @@ static int scr_view( const char *title, ftext *lines, int nlines, const char **b
 			}
 		}
 		k = scr_key();
+		if ( k == K_CLICK ) {   /* a button, or the text: upper half up */
+			if ( ( i = button_hit( y + h - 3, x, w, buttons, n ) ) >= 0 )
+				return i;
+			if ( mx > x && mx < x + w - 1 && my > y && my <= y + vis )
+				k = my <= y + vis / 2 ? 0x149 : 0x151;
+		}
 		switch ( k ) {
 		case 0x148: if ( top > 0 ) top--; break;                         /* up */
 		case 0x150: if ( top + vis < nlines ) top++; break;              /* down */
@@ -395,6 +502,15 @@ static int scr_checklist( const char *title, const char *text, const char **item
 			scr_put( x + w - 3, y + 2 + lines + rows, A_WINTXT, top + rows < n ? "\x19" : " " );
 		}
 		k = scr_key();
+		if ( k == K_CLICK && mx > x && mx < x + w - 1 && my >= y + 3 + lines && my < y + 3 + lines + rows ) {
+			i = my - y - 3 - lines;
+			if ( rows < n && mx == x + w - 3 && ( i == 0 || i == rows - 1 ) )
+				k = i ? 0x151 : 0x149;   /* the arrows: page */
+			else {
+				cur = top + i;
+				k = ' ';
+			}
+		}
 		if ( k == 13 )
 			return 0;
 		if ( k == 27 )
