@@ -138,8 +138,8 @@ int named_result( const char *name, int n )
 	return *find_path( name, n ) != 0;
 }
 
-/* "1,!2,?CDEX|text": options 1 on and 2 off, [Find] CDEX found; returns
- * the text or NULL */
+/* "1,!2,?CDEX,@de|text": options 1 on and 2 off, [Find] CDEX found,
+ * language de chosen; returns the text or NULL */
 const char *cond( const char *v )
 {
 	const char *bar = strchr( v, '|' ), *p = v;
@@ -154,6 +154,15 @@ const char *cond( const char *v )
 		if ( *p == '!' ) {
 			neg = 1;
 			p++;
+		}
+		if ( *p == '@' ) {        /* @de: [Languages] chose de */
+			const char *q = ++p;
+			while ( p < bar && *p != ',' && *p != ' ' )
+				p++;
+			if ( ( (int)strlen( selected_language ) == p - q &&
+				!strnicmp( selected_language, q, p - q ) ) == neg )
+				return NULL;
+			continue;
 		}
 		if ( *p == '?' ) {
 			const char *q = ++p;

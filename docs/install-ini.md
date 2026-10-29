@@ -179,6 +179,7 @@ license should give it the same name.
 | `?CDEX` | `[Find]` found CDEX, or the `[Detect]` program CDEX returned 0 |
 | `!?CDEX` | the opposite |
 | `?%WINDIR%\NET.EXE` | the file exists |
+| `@de`, `!@de` | `[Languages]` chose the code `de` (or not) |
 
 So `?%WINDIR%\NET.EXE|NET.EXE=%WINDIR%\` replaces a file only where it is
 installed. Text without a `|` always applies.
@@ -261,6 +262,29 @@ Config=CALMIRA.INI|Language|Selected
 write after copying; its other settings are kept. `%LANGUAGE%` is available
 to commands and expanded values. The package supplies the actual catalogue
 files; this does not translate the installer itself.
+
+A third field of `Choice=` lists the country codes of the language
+(`COUNTRY=` of DOS, `iCountry=` of `[intl]` in WIN.INI under Windows): the
+first choice that lists the country of the system is preselected, also for
+`INSTALL /S`; otherwise `Default=`. The condition `@code` selects files and
+other lines by the language chosen; the first active `[Files]` line that
+names an archive file decides its target, so one file can go to different
+names per language:
+
+```ini
+[Languages]
+Default=en
+Choice=en|English
+Choice=de|Deutsch|49,43,41,423
+Choice=ru|Russkij|7,375,380
+
+[Files]
+@de|VC.HLP=VC-ORI.HLP      ; the English help is kept under another name
+@ru|VC.HLP=VC-ORI.HLP
+VC.HLP
+@de|VC-GER.HLP=VC.HLP
+@ru|VCR.HLP=VC.HLP
+```
 
 ## Installer texts
 

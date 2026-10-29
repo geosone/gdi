@@ -52,6 +52,22 @@ int gdi_text_language( const char *name )
 	return -1;
 }
 
+/* the country of the system: iCountry= in [intl] of WIN.INI under Windows,
+ * else COUNTRY= of DOS (1 when DOS has none) */
+int gdi_system_country( void )
+{
+#ifdef __WINDOWS__
+	return GetProfileInt( "intl", "iCountry", 1 );
+#else
+	static char info[34];   /* DOS writes the country information here */
+	union REGS r;
+	r.x.ax = 0x3800;        /* the country of COUNTRY= */
+	r.x.dx = (unsigned)info;
+	intdos( &r, &r );
+	return r.x.cflag ? 1 : r.x.bx;
+#endif
+}
+
 static void choose( void )
 {
 	char item[10];
@@ -67,17 +83,8 @@ static void choose( void )
 			language = i;
 			return;
 		}
-	country = GetProfileInt( "intl", "iCountry", 1 );
-#else
-	{
-		static char info[34];   /* DOS writes the country information here */
-		union REGS r;
-		r.x.ax = 0x3800;        /* the country of COUNTRY= */
-		r.x.dx = (unsigned)info;
-		intdos( &r, &r );
-		country = r.x.cflag ? 1 : r.x.bx;
-	}
 #endif
+	country = gdi_system_country();
 	sprintf( item, "%d", country );
 	for ( i = 1; i < GDI_LANGUAGES; i++ )
 		if ( listed( gdi_language[i][1], item ) ) {

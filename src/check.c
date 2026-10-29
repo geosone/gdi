@@ -158,7 +158,7 @@ static const char *condition( const char *v )
 			break;
 		if ( *p == '!' )
 			p++;
-		if ( *p == '?' ) {
+		if ( *p == '?' || *p == '@' ) {
 			while ( p < bar && *p != ',' && *p != ' ' )
 				p++;
 			continue;
@@ -176,6 +176,19 @@ static const char *condition( const char *v )
 			break;
 		if ( *p == '!' )
 			p++;
+		if ( *p == '@' ) {   /* @de: a code of [Languages] Choice= */
+			const char *q = p++;
+			while ( p < bar && *p != ',' && *p != ' ' )
+				p++;
+			n = p - q;
+			for ( i = 0; i < nnames && !( (int)strlen( names[i] ) == n && same_n( names[i], q, n ) ); i++ )
+				;
+			if ( i == nnames ) {
+				sprintf( name, "%.*s", n > 23 ? 23 : n, q );
+				problem( "condition %s: not a [Languages] Choice=%s", name, "" );
+			}
+			continue;
+		}
 		if ( *p == '?' ) {
 			const char *q = ++p;
 			while ( p < bar && *p != ',' && *p != ' ' )
@@ -296,6 +309,10 @@ int gdi_check( const char *ini, void (*out)( const char *text ) )
 				if ( ( same( section, "Find" ) || same( section, "Detect" ) ) && e &&
 					nnames < MAXNAMES ) {
 					sprintf( names[nnames], "%.*s", (int)( e - s > 23 ? 23 : e - s ), s );
+					trim( names[nnames++] );
+				} else if ( same( section, "Languages" ) && e && same_n( s, "Choice", 6 ) &&
+					s[6] == '=' && strchr( e, '|' ) && nnames < MAXNAMES ) {
+					sprintf( names[nnames], "@%.*s", (int)( strchr( e, '|' ) - e - 1 > 22 ? 22 : strchr( e, '|' ) - e - 1 ), e + 1 );
 					trim( names[nnames++] );
 				} else if ( same( section, "Options" ) && e && same_n( s, "Option", 6 ) && s[6] == '=' )
 					nopts++;

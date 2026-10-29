@@ -33,5 +33,6 @@ const char *gdi_text_name( void );
 void gdi_text_reset( void );
 /* the section for an sLanguage= or a country code of a Windows; -1: none */
 int  gdi_language_find( const char *slanguage, int country );
+int  gdi_system_country( void );
 /* the text key of section lang (-1: the installer's), DOS code page */
 void gdi_text_copy( int lang, const char *key, char *out, int size );

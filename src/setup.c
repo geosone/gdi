@@ -25,25 +25,35 @@
 void ask_language( void )
 {
 	const char *value;
-	char codes[8][9], labels[8][32];
+	char codes[8][9], labels[8][32], country[8];
 	const char *buttons[8];
-	int pos = 0, count = 0, selected = 0, i;
+	int pos = 0, count = 0, selected = 0, detected = -1, i;
+	sprintf( country, ",%d,", gdi_system_country() );
 	while ( ( pos = ini_next( "Languages", "Choice", pos, &value ) ) >= 0 ) {
-		const char *bar = strchr( value, '|' );
-		int length = bar ? (int)( bar - value ) : 0;
-		if ( count == 8 || length < 2 || length > 8 || !bar[1] ||
-			strlen( bar + 1 ) > 31 )
+		const char *bar = strchr( value, '|' ), *list;
+		int length = bar ? (int)( bar - value ) : 0, label;
+		list = bar ? strchr( bar + 1, '|' ) : NULL;
+		label = bar ? ( list ? (int)( list - bar - 1 ) : (int)strlen( bar + 1 ) ) : 0;
+		if ( count == 8 || length < 2 || length > 8 || label < 1 || label > 31 )
 			fail( "Invalid [Languages] Choice entry." );
 		for ( i = 0; i < length; i++ )
 			if ( !isalnum( (unsigned char)value[i] ) && value[i] != '-' )
 				fail( "Invalid language code." );
 		sprintf( codes[count], "%.*s", length, value );
-		strcpy( labels[count], bar + 1 );
+		sprintf( labels[count], "%.*s", label, bar + 1 );
 		buttons[count] = labels[count];
 		if ( !stricmp( codes[count], ini_get( "Languages", "Default", "en" ) ) )
 			selected = count;
+		if ( list && detected < 0 ) {   /* Choice=de|Deutsch|49,43,41 */
+			char countries[80];
+			sprintf( countries, ",%.77s,", list + 1 );
+			if ( strstr( countries, country ) )
+				detected = count;
+		}
 		count++;
 	}
+	if ( detected >= 0 )   /* the language of the system's COUNTRY= */
+		selected = detected;
 	if ( !count ) return;
 	selected = ui_message( T( "LanguageTitle" ),
 		T( "LanguageText" ),
