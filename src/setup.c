@@ -69,8 +69,6 @@ static void write_language( void )
 	const char *value = ini_get( "Languages", "Config", NULL );
 	char data[200], path[80], setting[150], section[40], key[80], line[256];
 	char *bar, *name;
-	int index, end, i, error;
-	FILE *output;
 	if ( !value ) return;
 	if ( strlen( value ) >= sizeof(data) ) fail( "Invalid language config." );
 	strcpy( data, value );
@@ -84,30 +82,19 @@ static void write_language( void )
 		fail( "Language config must be an installed package-relative file." );
 	path_cat( path, dest, name );
 	sprintf( setting, "%s=%s", bar, selected_language );
-	if ( system_set_split( setting, section, key, line ) || ed_load( path ) )
+	if ( system_set_split( setting, section, key, line ) )
 		fail( "Cannot read the installed language config." );
-	index = ini_find_key( section, key, &end );
-	if ( index == -2 ) fail( "Duplicate language config key." );
-	if ( index >= 0 ) {
-		free( ed[index] );
-		ed[index] = str_dup( line );
-	} else if ( end >= 0 )
-		ed_insert( end, line );
-	else {
-		char header[44];
-		sprintf( header, "[%s]", section );
-		ed_insert( ned, header );
-		ed_insert( ned, line );
+	/* This is the package's just-copied file, not an external system INI:
+	 * no .G01 backup in its uninstall directory.  Streamed, so a large
+	 * settings file does not exhaust the near heap. */
+	switch ( ini_file_set( path, section, key, line ) ) {
+	case 0:
+		break;
+	case -2:
+		fail( "Duplicate language config key." );
+	default:
+		fail( "Cannot write the installed language config." );
 	}
-	/* This is the package's just-copied file, not an external system INI.
-	 * Do not leave untracked .G01 files in its uninstall directory. */
-	output = fopen( path, "w" );
-	if ( !output ) fail( "Cannot write the installed language config." );
-	error = 0;
-	for ( i = 0; i < ned; i++ )
-		if ( fprintf( output, "%s\n", ed[i] ) < 0 ) error = 1;
-	if ( fclose( output ) || error ) fail( "Cannot write the installed language config." );
-	ed_free();
 }
 
 

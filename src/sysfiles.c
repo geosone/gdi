@@ -826,6 +826,62 @@ int ini_find_key( const char *section, const char *key, int *end )
 	return found;
 }
 
+/* Set section/key to line in an INI file of any size: it is copied line by
+ * line to a temporary file next to it, so its length does not depend on the
+ * memory left in DGROUP.  0 on success, -2 for a duplicate key (the file is
+ * left as it was), -1 for a read or write error. */
+int ini_file_set( const char *path, const char *section, const char *key,
+	const char *line )
+{
+	char temp[80], buf[256], *slash;
+	FILE *in, *out;
+	int inside = 0, done = 0, seen = 0, whole = 1, error = 0, l;
+	strcpy( temp, path );
+	slash = strrchr( temp, '\\' );
+	strcpy( slash ? slash + 1 : temp, "GDI$INI.TMP" );
+	if ( !( in = fopen( path, "r" ) ) )
+		return -1;
+	if ( !( out = fopen( temp, "w" ) ) ) {
+		fclose( in );
+		return -1;
+	}
+	while ( fgets( buf, sizeof(buf), in ) ) {
+		int start = whole;   /* a longer line goes on unchanged */
+		l = strlen( buf );
+		whole = l && buf[l - 1] == '\n';
+		while ( l && ( buf[l - 1] == '\n' || buf[l - 1] == '\r' || buf[l - 1] == 0x1A ) )
+			buf[--l] = 0;
+		if ( start && ini_is_header( buf ) ) {
+			if ( inside && !done ) {   /* at the end of the section */
+				if ( fprintf( out, "%s\n", line ) < 0 ) error = 1;
+				done = 1;
+			}
+			inside = ini_header_is( buf, section );
+			seen |= inside;
+		} else if ( start && inside && ini_key_is( buf, key ) ) {
+			if ( done ) {
+				fclose( in );
+				fclose( out );
+				remove( temp );
+				return -2;
+			}
+			if ( fprintf( out, "%s\n", line ) < 0 ) error = 1;
+			done = 1;
+			continue;
+		}
+		if ( fprintf( out, whole ? "%s\n" : "%s", buf ) < 0 ) error = 1;
+	}
+	if ( ferror( in ) ) error = 1;
+	fclose( in );
+	if ( !done && !seen && fprintf( out, "[%s]\n", section ) < 0 ) error = 1;
+	if ( !done && fprintf( out, "%s\n", line ) < 0 ) error = 1;
+	if ( fclose( out ) || error || remove( path ) || rename( temp, path ) ) {
+		remove( temp );
+		return -1;
+	}
+	return 0;
+}
+
 int system_set_split( const char *text, char *section, char *key,
 	char *line )
 {

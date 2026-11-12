@@ -64,7 +64,10 @@ else
     printf '\xcd\x20' > "$OUT/src/TESTTOOL.COM"      # INT 20h
     printf '\xb8\x00\x4c\xcd\x21' > "$OUT/src/YES.COM"
     printf '\xb8\x01\x4c\xcd\x21' > "$OUT/src/NO.COM"
-    printf '[Language]\r\nSelected=en\r\n[Keep]\r\nValue=preserved\r\n' > "$OUT/src/SETTINGS.INI"
+    # 30 KB and 1000 lines before [Language]: more than the near heap and the
+    # 600-line editor buffer could hold
+    { printf '[Pad]\r\n'; for i in $(seq 1 1000); do printf 'Key%d=a value of padding text\r\n' "$i"; done
+      printf '[Language]\r\nSelected=en\r\n[Keep]\r\nValue=preserved\r\n'; } > "$OUT/src/SETTINGS.INI"
     printf 'TESTVXD test VxD\r\n' > "$OUT/src/TESTVXD.386"
 fi
 [ -n "${PROGRAM:-}" ] && printf '\xcd\x20' > "$OUT/src/SHSUCDX.COM"
@@ -177,7 +180,7 @@ for f in "$OUT"/*.ppm; do [ -f "$f" ] && magick "$f" "${f%.ppm}.png" && rm -f "$
 tr -d '\r' < "$OUT/serial.log"
 if [ -n "${LANGUAGE:-}" ]; then
     mcopy -o -i "$P" ::/TESTLANG/SETTINGS.INI "$OUT/LANGUAGE.INI"
-    python3 -c 'import configparser,sys; c=configparser.ConfigParser(); c.read(sys.argv[1]); assert c["Language"]["Selected"] == "de"; assert c["Keep"]["Value"] == "preserved"' "$OUT/LANGUAGE.INI" || exit 1
+    python3 -c 'import configparser,sys; c=configparser.ConfigParser(); c.read(sys.argv[1]); assert c["Language"]["Selected"] == "de"; assert c["Keep"]["Value"] == "preserved"; assert len(c["Pad"]) == 1000' "$OUT/LANGUAGE.INI" || exit 1
     echo "DOS language selection integration passed"
 fi
 if [ -n "${PROGRAM:-}" ]; then

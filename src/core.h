@@ -96,6 +96,8 @@ int entry_new( const char *section, const char *key, const char *v );
 const char *cond_new( const char *section, const char *key, const char *v );
 int ini_find_key( const char *section, const char *key, int *end );
 int system_set_split( const char *text, char *section, char *key, char *line );
+int ini_file_set( const char *path, const char *section, const char *key,
+	const char *line );
 int has_entry( const char *section, const char *key );
 char *trim_field( char *text );
 int patch_split( const char *value, char *path, char *old_hex, char *new_hex, int *expected );

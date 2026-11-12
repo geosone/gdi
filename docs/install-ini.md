@@ -259,7 +259,8 @@ Config=CALMIRA.INI|Language|Selected
 ```
 
 `Config` names an installed package-relative INI file and the section/key to
-write after copying; its other settings are kept. `%LANGUAGE%` is available
+write after copying; its other settings are kept. The file is rewritten
+line by line, so it may be of any size. `%LANGUAGE%` is available
 to commands and expanded values. The package supplies the actual catalogue
 files; this does not translate the installer itself.
 
