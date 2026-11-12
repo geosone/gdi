@@ -826,6 +826,37 @@ int ini_find_key( const char *section, const char *key, int *end )
 	return found;
 }
 
+/* The value of section/key of an INI file of any size, read line by line:
+ * 1 found, 0 absent, -1 if the file cannot be read. */
+int ini_file_get( const char *path, const char *section, const char *key,
+	char *value, int size )
+{
+	char buf[256];
+	FILE *in = fopen( path, "r" );
+	int inside = 0, whole = 1, l;
+	if ( !in )
+		return -1;
+	while ( fgets( buf, sizeof(buf), in ) ) {
+		int start = whole;
+		l = strlen( buf );
+		whole = l && buf[l - 1] == '\n';
+		while ( l && ( buf[l - 1] == '\n' || buf[l - 1] == '\r' || buf[l - 1] == 0x1A ) )
+			buf[--l] = 0;
+		if ( !start )
+			continue;
+		if ( ini_is_header( buf ) )
+			inside = ini_header_is( buf, section );
+		else if ( inside && ini_key_is( buf, key ) ) {
+			sprintf( value, "%.*s", size - 1, strchr( buf, '=' ) + 1 );
+			fclose( in );
+			return 1;
+		}
+	}
+	fclose( in );
+	value[0] = 0;
+	return 0;
+}
+
 /* Set section/key to line in an INI file of any size: it is copied line by
  * line to a temporary file next to it, so its length does not depend on the
  * memory left in DGROUP.  0 on success, -2 for a duplicate key (the file is

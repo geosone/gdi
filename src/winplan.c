@@ -36,7 +36,26 @@ static void winini_run( int add, const char *program )
 	const char *v;
 	int index, end, found = 0, n;
 	path_cat( path, windir, "WIN.INI" );
-	if ( !*windir || ( ed_load( path ) && !add ) )
+	if ( !*windir )
+		return;
+	/* Look first without loading WIN.INI: a large one does not fit in the
+	 * near heap, and nothing changes when the runner is (not) there. */
+	if ( ini_file_get( path, "windows", "run", value, sizeof(value) ) < 0 && !add )
+		return;
+	for ( v = value; *v && !found; ) {
+		while ( *v == ' ' || *v == '\t' || *v == ',' )
+			v++;
+		for ( n = 0; v[n] && v[n] != ' ' && v[n] != '\t' && v[n] != ','; n++ );
+		if ( !n )
+			break;
+		sprintf( word, "%.*s", n < 79 ? n : 79, v );
+		v += n;
+		found = !stricmp( word, program );
+	}
+	if ( found == add )
+		return;
+	found = 0;
+	if ( ed_load( path ) && !add )
 		return;
 	index = ini_find_key( "windows", "run", &end );
 	if ( index == -2 )

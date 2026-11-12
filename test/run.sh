@@ -10,6 +10,7 @@
 #   PKG=test/depends ONEEXE=1 DEPENDS=1 test/run.sh   Requires=, Conflicts=
 #   INI=test/TESTINI.INI WINDOWS=1 INIFILES=1 TARGET=TESTINI KEYS="ret ret ret ret ret"
 #       [UNINST=1] test/run.sh   [Ini], [System.ini] Change=
+#       (BIGWININI=1 UNINST=1: a 20 KB WIN.INI the uninstaller must not load)
 #   PKG=test/newer TARGET=NEWTEST NEWER=1 KEYS="ret ret ret ret" [UNINST=1] test/run.sh
 #                       [Newer]
 #   PKG=test/owner ONEEXE=1 OWNER=1 KEYS=... test/run.sh   a file replaced by
@@ -136,6 +137,11 @@ if [ -n "${WINDOWS:-}" ]; then   # a fake Windows directory with SYSTEM.INI
     printf '\xcd\x20' > "$OUT/WIN.COM"
     printf '[boot]\r\nshell=progman.exe\r\n\r\n[386Enh]\r\ndevice=*vpicd\r\n\r\n[NonWindowsApp]\r\n' > "$OUT/SYSTEM.INI"
     mcopy -o -i "$P" "$OUT/WIN.COM" "$OUT/SYSTEM.INI" ::/WINDOWS/
+    if [ -n "${BIGWININI:-}" ]; then   # 20 KB: more than the near heap holds
+        { printf '[windows]\r\nrun=\r\nload=\r\n\r\n[Pad]\r\n'
+          for i in $(seq 1 600); do printf 'Key%d=a value of padding text\r\n' "$i"; done; } > "$OUT/WIN.INI"
+        mcopy -o -i "$P" "$OUT/WIN.INI" ::/WINDOWS/
+    fi
     sed -i 's/^A:\\SRC\\QEXIT/ECHO === SYSTEM.INI > AUX\r\nTYPE A:\\WINDOWS\\SYSTEM.INI > AUX\r\nA:\\SRC\\QEXIT/' "$OUT/src/RUN.BAT"
     mcopy -o -i "$P" "$OUT/src/RUN.BAT" ::/SRC/
 fi
@@ -305,6 +311,12 @@ if [ -n "${INIFILES:-}" ]; then
     if [ -n "${UNINST:-}" ]; then
         cmp "$OUT/CONTROL.INI" "$OUT/CONTROL-AFTER.INI" || exit 1
         cmp "$OUT/SYSTEM.INI" "$OUT/SYSTEM-AFTER.INI" || exit 1   # Change= undone
+        if [ -n "${BIGWININI:-}" ]; then   # nothing to undo: not even loaded
+            mcopy -o -i "$P" ::/WINDOWS/WIN.INI "$OUT/WIN-AFTER.INI"
+            cmp "$OUT/WIN.INI" "$OUT/WIN-AFTER.INI" || exit 1
+            # the uninstall finished: its directory is gone
+            ! mdir -i "$P" ::/TESTINI >/dev/null 2>&1 || exit 1
+        fi
         ! mdir -i "$P" ::/APP.INI >/dev/null 2>&1 || exit 1
     else
         mcopy -o -i "$P" ::/APP.INI "$OUT/APP.INI" || exit 1
