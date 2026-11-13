@@ -466,12 +466,20 @@ int copy_file( const char *from, const char *to )
 	return fclose( out ) ? -1 : 0;
 }
 
+int rollback_ready;   /* copy_all() of a first installation began */
+
 void fail( const char *text )
 {
 	static const char *ok[] = { "OK" };
 	ui_message( T( "ErrorTitle" ), text, ok, 1, 0, 1 );
 	if ( in_extra )
 		longjmp( extra_abort, 2 );
+	if ( rollback_ready && !frontend() ) {
+		rollback_ready = 0;   /* a failure while undoing just ends */
+		ui_clear();
+		rollback_install();
+		ui_message( T( "ErrorTitle" ), T( "RolledBack" ), ok, 1, 0, 1 );
+	}
 	completion_status = 2;
 	ui_exit();
 	exit( 2 );

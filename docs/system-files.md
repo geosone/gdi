@@ -4,6 +4,8 @@ The installer changes `CONFIG.SYS` and `AUTOEXEC.BAT` of the system on
 `/B:d:` (default: the boot drive), and `SYSTEM.INI`, `WIN.INI` and the
 Program Manager groups of Windows 3.x. Every change is recorded so that
 `INSTALL /U` can undo it (see [Uninstall and updates](uninstall-update.md)).
+Files of any size are edited: their lines wait in far memory, not in the
+small near heap of the DOS installer, and there is no line limit.
 
 ## CONFIG.SYS and AUTOEXEC.BAT
 
@@ -50,6 +52,8 @@ Replace=yes                     ; write a new file (the old one is kept as backu
   `PATH` line (one per line or separated by `;`), at
   installation and at `INSTALL /U` (like `Remove=`): only that part, the
   rest of the line stays (`PATH ;` when it named nothing else).
+- `Remove=` text may use variables: `Remove=%DIR%\DOSLFN\DOSLFN` takes out
+  only the line this package added, wherever it was installed.
 - `Replace=yes` writes a new file; the old one is kept as backup.
 
 **Where lines go:**

@@ -61,7 +61,7 @@ static void winini_run( int add, const char *program )
 	if ( index == -2 )
 		fail( T( "SetDefinition" ) );
 	value[0] = 0;
-	if ( index >= 0 && ( v = strchr( ed[index], '=' ) ) != NULL )
+	if ( index >= 0 && ( v = strchr( ED( index ), '=' ) ) != NULL )
 		sprintf( value, "%.255s", v + 1 );
 	strcpy( out, "run=" );
 	for ( v = value; *v; ) {
@@ -93,10 +93,9 @@ static void winini_run( int add, const char *program )
 		strcat( out, program );
 	}
 	if ( index >= 0 ) {
-		free( ed[index] );
-		ed[index] = str_dup( out );
+		ed_set( index, out );
 	} else if ( end >= 0 ) {
-		while ( end > 0 && !ed[end - 1][0] )
+		while ( end > 0 && !ED( end - 1 )[0] )
 			end--;
 		ed_insert( end, out );
 	} else {

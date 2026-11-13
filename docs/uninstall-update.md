@@ -18,6 +18,15 @@ order:
    parent directories Setup created for it (`DIRS.LOG`), and the entry in
    `GDI.INI`.
 
+## A setup that fails
+
+When a first installation in DOS stops with an error after it began to copy
+files (for example "Not enough memory" or a write error), Setup undoes what
+it did so far as `INSTALL /U` would, without `[Run] Uninstall=`, and then
+says so. An update or a reinstallation over an existing `INSTALL.LOG` is not
+undone: that would remove the earlier installation. The Win16 frontend does
+not roll back yet.
+
 ## The journals
 
 All of them are in the target directory (`%DIR%`):

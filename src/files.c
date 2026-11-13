@@ -391,6 +391,8 @@ void copy_all( void )
 	progtitle = T( "CopyTitle" );
 	if ( unin ) {
 		path_cat( to, jdir, "INSTALL.LOG" );
+		/* a first installation: a failure from here on undoes it */
+		rollback_ready = !uninstall && !update_mode && !in_extra && !file_exists( to );
 		old_log_load( to );
 		logf = fopen( to, "w" );
 		if ( *dest_top ) {
@@ -650,11 +652,10 @@ static int hand_over_file( const char *path, const char *mine )
 	return 1;
 }
 
+static void remove_installed( int rollback );
+
 void remove_all( void )
 {
-	const char *v, *t;
-	char p[80], name[40];
-	int pos = 0, had_log = 0, pending;
 	static const char *b[2];
 	b[0] = T( "Remove" );
 	b[1] = T( "Cancel" );
@@ -663,10 +664,32 @@ void remove_all( void )
 		abort_setup();
 	}
 	dirs_from_setup_dir( srcdir );
+	remove_installed( 0 );
+}
+
+/* a first installation that failed: what it changed so far is undone as
+ * INSTALL /U would, from its directories, without [Run] Uninstall= */
+void rollback_install( void )
+{
+	if ( logf ) {
+		fclose( logf );
+		logf = NULL;
+	}
+	uninstall = 1;
+	remove_installed( 1 );
+}
+
+static void remove_installed( int rollback )
+{
+	const char *v, *t;
+	char p[80], name[40];
+	int pos = 0, had_log = 0, pending;
 	for ( pos = 0; pos < MAXOPT; pos++ )
 		opt_on[pos] = 1;
-	find_windows();
-	run_all( "Uninstall" );   /* the package's own undo, while its files are there */
+	if ( !rollback ) {
+		find_windows();
+		run_all( "Uninstall" );   /* the package's own undo, while its files are there */
+	}
 	patch_all();
 	edit_all();
 	progman_undo();
@@ -723,7 +746,8 @@ void remove_all( void )
 		remove( p );
 	}
 	record_write( 0 );
-	if ( !keep_uninstaller && !pending ) {
+	/* a rollback keeps a setup that runs from its own target directory */
+	if ( !keep_uninstaller && !pending && ( !rollback || stricmp( jdir, srcdir ) ) ) {
 		path_cat( p, jdir, "INSTALL.INI" );
 		remove( p );
 		path_cat( p, jdir, "INSTALL.EXE" );

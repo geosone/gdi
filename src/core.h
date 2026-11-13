@@ -4,7 +4,6 @@
  * Copyright (C) 2026 GeosOne.  GNU General Public License version 3. */
 
 #define MAXOPT   16
-#define MAXLINE  600
 #define MAXFIND  8
 #define MAXDETECT 16
 
@@ -67,7 +66,8 @@ extern char dest_top[80];
 extern char jdir[80];   /* INSTALL.INI/EXE and the journals ([Setup] SetupDir=) */
 void setup_dir( void );
 void dirs_from_setup_dir( const char *dir );
-extern char *ed[MAXLINE];
+char *ED( int i );   /* near copy of line i of the file being edited */
+void ed_set( int i, const char *s );
 extern int ned;
 
 /* core.c */
@@ -151,6 +151,8 @@ int run_program( const char *cmdline );
 void run_all( const char *key );
 void edit_all( void );
 void remove_all( void );
+void rollback_install( void );
+extern int rollback_ready;   /* a failure undoes the first installation */
 
 /* setup.c */
 void ask_language( void );

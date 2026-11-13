@@ -11,6 +11,9 @@
 #   INI=test/TESTINI.INI WINDOWS=1 INIFILES=1 TARGET=TESTINI KEYS="ret ret ret ret ret"
 #       [UNINST=1] test/run.sh   [Ini], [System.ini] Change=
 #       (BIGWININI=1 UNINST=1: a 20 KB WIN.INI the uninstaller must not load)
+#       (BIGSYSINI=1 [UNINST=1]: a 22 KB SYSTEM.INI of 700 more lines, edited whole)
+#   INI=test/TESTFAIL.INI TARGET=TESTFAIL ROLLBACK=1 test/run.sh
+#                       a first installation fails: what it changed is undone
 #   PKG=test/newer TARGET=NEWTEST NEWER=1 KEYS="ret ret ret ret" [UNINST=1] test/run.sh
 #                       [Newer]
 #   PKG=test/owner ONEEXE=1 OWNER=1 KEYS=... test/run.sh   a file replaced by
@@ -136,6 +139,9 @@ if [ -n "${WINDOWS:-}" ]; then   # a fake Windows directory with SYSTEM.INI
     mmd -i "$P" ::/WINDOWS
     printf '\xcd\x20' > "$OUT/WIN.COM"
     printf '[boot]\r\nshell=progman.exe\r\n\r\n[386Enh]\r\ndevice=*vpicd\r\n\r\n[NonWindowsApp]\r\n' > "$OUT/SYSTEM.INI"
+    if [ -n "${BIGSYSINI:-}" ]; then   # 22 KB, 700 more lines: beyond the near heap and 600 lines
+        { printf '[Pad]\r\n'; for i in $(seq 1 700); do printf 'Key%d=a value of padding text\r\n' "$i"; done; } >> "$OUT/SYSTEM.INI"
+    fi
     mcopy -o -i "$P" "$OUT/WIN.COM" "$OUT/SYSTEM.INI" ::/WINDOWS/
     if [ -n "${BIGWININI:-}" ]; then   # 20 KB: more than the near heap holds
         { printf '[windows]\r\nrun=\r\nload=\r\n\r\n[Pad]\r\n'
@@ -305,6 +311,14 @@ if [ -n "${CHECK:-}" ]; then
     tr -d '\r' < "$OUT/serial.log" | grep -qx 'no problems' || exit 1
     echo "DOS INSTALL /CHECK integration passed"
 fi
+if [ -n "${ROLLBACK:-}" ]; then
+    mdir -i "$P" "::/$TARGET" >/dev/null 2>&1 && { echo "$TARGET left after the failure"; exit 1; }
+    mcopy -o -i "$P" ::/CONFIG.SYS "$OUT/CONFIG-AFTER.SYS" && cmp "$OUT/CONFIG.SYS" "$OUT/CONFIG-AFTER.SYS" || { echo "CONFIG.SYS changed"; exit 1; }
+    tr -d '\r' < "$OUT/serial.log" | sed -n '/=== AUTOEXEC.BAT/,/=== TARGET/p' | grep -qi 'TESTTOOL' && { echo "AUTOEXEC.BAT changed"; exit 1; }
+    mdir -i "$P" ::/GDI.INI >/dev/null 2>&1 && mtype -i "$P" ::/GDI.INI | grep -qi TESTFAIL && { echo "registered"; exit 1; }
+    echo "DOS rollback of a failed installation passed"
+    exit 0
+fi
 if [ -n "${INIFILES:-}" ]; then
     mcopy -o -i "$P" ::/WINDOWS/CONTROL.INI "$OUT/CONTROL-AFTER.INI"
     mcopy -o -i "$P" ::/WINDOWS/SYSTEM.INI "$OUT/SYSTEM-AFTER.INI"
@@ -322,6 +336,10 @@ if [ -n "${INIFILES:-}" ]; then
         mcopy -o -i "$P" ::/APP.INI "$OUT/APP.INI" || exit 1
         tr -d '\r' < "$OUT/SYSTEM-AFTER.INI" | grep -qx 'device=A:\\TESTINI\\VPICDA.386' || exit 1
         ! tr -d '\r' < "$OUT/SYSTEM-AFTER.INI" | grep -qx 'device=\*vpicd' || exit 1
+        if [ -n "${BIGSYSINI:-}" ]; then   # every line of the large file is still there
+            [ "$(tr -d '\r' < "$OUT/SYSTEM-AFTER.INI" | grep -c '^Key[0-9]*=a value of padding text$')" = 700 ] || exit 1
+            tr -d '\r' < "$OUT/SYSTEM-AFTER.INI" | grep -qx 'Key700=a value of padding text' || exit 1
+        fi
         python3 -c 'import configparser,sys; c=configparser.ConfigParser(); c.read(sys.argv[1]); assert c["MMCPL"]["kframe"].upper() == "A:\\TESTINI\\KFRAME.CPL"; assert c["MMCPL"]["old"] == "1"; assert c["drivers.desc"]["test.drv"] == "Test driver"; a=configparser.ConfigParser(); a.read(sys.argv[2]); assert a["Options"]["Mode"] == "2"' "$OUT/CONTROL-AFTER.INI" "$OUT/APP.INI" || exit 1
     fi
     echo "DOS [Ini] Set integration passed"

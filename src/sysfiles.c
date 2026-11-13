@@ -22,21 +22,71 @@
 
 /* --- text file editing (CONFIG.SYS, AUTOEXEC.BAT, SYSTEM.INI) -------- */
 
-char *ed[MAXLINE];
+/* The lines wait in far memory: a SYSTEM.INI may be larger than the near
+ * heap of the DOS installer, and there is no line limit.  ED( i ) is a near
+ * copy of line i that stays valid for the next ED_COPIES - 1 calls;
+ * ed_set( i, s ) replaces the line. */
+#define ED_COPIES 4
+#define ED_WIDTH  256   /* fgets() buffer: no line is longer */
+static char __far * __far *edl;
+static int edmax;
 int ned;
+
+static char __far *ed_dup( const char *s )
+{
+	unsigned n = strlen( s );
+	char __far *p;
+	if ( n > ED_WIDTH - 1 )
+		n = ED_WIDTH - 1;
+	if ( !( p = _fmalloc( n + 1 ) ) )
+		gdi_out_of_memory();
+	_fmemcpy( p, s, n );
+	p[n] = 0;
+	return p;
+}
+
+char *ED( int i )
+{
+	static char copy[ED_COPIES][ED_WIDTH];
+	static int next;
+	char *c = copy[next];
+	next = ( next + 1 ) % ED_COPIES;
+	_fstrcpy( c, edl[i] );
+	return c;
+}
+
+void ed_set( int i, const char *s )
+{
+	char __far *p = ed_dup( s );
+	_ffree( edl[i] );
+	edl[i] = p;
+}
+
+/* room for one more line */
+static void ed_room( void )
+{
+	if ( ned == edmax ) {
+		char __far * __far *t = _frealloc( edl, ( edmax + 128 ) * sizeof(char __far *) );
+		if ( !t )
+			gdi_out_of_memory();
+		edl = t;
+		edmax += 128;
+	}
+}
 
 int ed_load( const char *path )
 {
 	FILE *f = fopen( path, "r" );
-	char buf[256];
+	char buf[ED_WIDTH];
 	ned = 0;
 	if ( !f )
 		return -1;
-	while ( ned < MAXLINE && fgets( buf, sizeof(buf), f ) ) {
+	while ( fgets( buf, sizeof(buf), f ) ) {
 		int l = strlen( buf );
 		while ( l && ( buf[l - 1] == '\n' || buf[l - 1] == '\r' || buf[l - 1] == 0x1A ) )
 			buf[--l] = 0;
-		ed[ned++] = str_dup( buf );
+		ed_room();
+		edl[ned++] = ed_dup( buf );
 	}
 	fclose( f );
 	return 0;
@@ -45,20 +95,19 @@ int ed_load( const char *path )
 void ed_insert( int at, const char *s )
 {
 	int i;
-	if ( ned >= MAXLINE )
-		return;
+	ed_room();
 	for ( i = ned; i > at; i-- )
-		ed[i] = ed[i - 1];
-	ed[at] = str_dup( s );
+		edl[i] = edl[i - 1];
+	edl[at] = ed_dup( s );
 	ned++;
 }
 
 static void ed_delete( int at )
 {
 	int i;
-	free( ed[at] );
+	_ffree( edl[at] );
 	for ( i = at; i < ned - 1; i++ )
-		ed[i] = ed[i + 1];
+		edl[i] = edl[i + 1];
 	ned--;
 }
 
@@ -99,24 +148,25 @@ int ed_save( const char *path )
 	if ( !( f = fopen( path, "w" ) ) )
 		return -1;
 	for ( i = 0; i < ned; i++ )
-		fprintf( f, "%s\n", ed[i] );
+		fprintf( f, "%s\n", ED( i ) );
 	return fclose( f );
 }
 
 void ed_free( void )
 {
 	while ( ned )
-		free( ed[--ned] );
+		_ffree( edl[--ned] );
 }
 
 /* remove the lines matching any Remove= of section; returns the count */
 static int ed_remove( const char *section )
 {
 	const char *v;
+	char text[256];   /* expanded: Remove=%DIR%\DRIVER matches only this package */
 	int pos = 0, i, n = 0;
 	while ( ( pos = ini_next( section, "Remove", pos, &v ) ) >= 0 )
-		for ( i = 0; i < ned; i++ )
-			if ( contains( ed[i], v ) && ed[i][0] != '[' ) {
+		for ( expand( text, v, sizeof(text) ), i = 0; i < ned; i++ )
+			if ( contains( ED( i ), text ) && ED( i )[0] != '[' ) {
 				ed_delete( i-- );
 				n++;
 			}
@@ -228,21 +278,20 @@ static void ed_add_path( void )
 		expand( dir, t, sizeof(dir) );
 		/* the last line that sets the PATH counts */
 		for ( last = -1, i = 0; i < ned; i++ )
-			if ( !is_rem( ed[i] ) && path_value( ed[i] ) )
+			if ( !is_rem( ED( i ) ) && path_value( ED( i ) ) )
 				last = i;
 		if ( last < 0 ) {   /* none: the PATH of the system (Windows 9x) stays */
 			sprintf( line, "PATH %%PATH%%;%s", dir );
-			for ( i = 0; i < ned && !strnicmp( ed[i], "@ECHO", 5 ); i++ )
+			for ( i = 0; i < ned && !strnicmp( ED( i ), "@ECHO", 5 ); i++ )
 				;
 			ed_insert( i, line );
 			continue;
 		}
-		val = path_value( ed[last] );
-		if ( path_part( val, dir, &n ) || strlen( ed[last] ) + strlen( dir ) + 2 > sizeof(line) )
+		val = path_value( ED( last ) );
+		if ( path_part( val, dir, &n ) || strlen( ED( last ) ) + strlen( dir ) + 2 > sizeof(line) )
 			continue;
-		sprintf( line, "%s%s%s", ed[last], val[strlen( val ) - 1] == ';' ? "" : ";", dir );
-		free( ed[last] );
-		ed[last] = str_dup( line );
+		sprintf( line, "%s%s%s", ED( last ), val[strlen( val ) - 1] == ';' ? "" : ";", dir );
+		ed_set( last, line );
 	}
 }
 
@@ -270,10 +319,11 @@ static int path_shared( const char *dir )
  * line left with nothing but %PATH% (added by PathAppend) goes */
 static void path_drop( const char *dir )
 {
-	char *val, *part;
+	char *l, *val, *part;
 	int i, n;
 	for ( i = 0; i < ned; i++ ) {
-		if ( is_rem( ed[i] ) || !( val = path_value( ed[i] ) ) ||
+		l = ED( i );   /* changed here, then written back */
+		if ( is_rem( l ) || !( val = path_value( l ) ) ||
 			!( part = path_part( val, dir, &n ) ) )
 			continue;
 		/* with the ";" before it, or after it when it is the first */
@@ -281,10 +331,13 @@ static void path_drop( const char *dir )
 			memmove( part - 1, part + n, strlen( part + n ) + 1 );
 		else
 			memmove( part, part + n + ( part[n] == ';' ), strlen( part + n ) + 1 );
-		if ( !stricmp( val, "%PATH%" ) )
+		if ( !stricmp( val, "%PATH%" ) ) {
 			ed_delete( i-- );
-		else if ( !*val )
+			continue;
+		}
+		if ( !*val )
 			strcpy( val, ";" );   /* "PATH dir": an empty PATH, as without dir */
+		ed_set( i, l );
 	}
 }
 
@@ -381,23 +434,22 @@ static void ed_program( const char *section )
 		sprintf( list, "%.*s", (int)( b - t ), t );
 		expand( prog, b + 1, sizeof(prog) );
 		for ( i = 0; i < ned; i++ ) {
-			a = line_program( ed[i], &e );
-			if ( is_rem( ed[i] ) || !program_is( ed[i] + a, e - a, list ) ||
-				( e - a == (int)strlen( prog ) && !strnicmp( ed[i] + a, prog, e - a ) ) ||
-				strlen( ed[i] ) + strlen( prog ) >= sizeof(line) )
+			a = line_program( ED( i ), &e );
+			if ( is_rem( ED( i ) ) || !program_is( ED( i ) + a, e - a, list ) ||
+				( e - a == (int)strlen( prog ) && !strnicmp( ED( i ) + a, prog, e - a ) ) ||
+				strlen( ED( i ) ) + strlen( prog ) >= sizeof(line) )
 				continue;
 			/* from LH on: LH SHSUCDX would relocate low, SHSUCDX goes high */
-			for ( a = 0; ed[i][a] == ' ' || ed[i][a] == '\t' || ed[i][a] == '@'; a++ )
+			for ( a = 0; ED( i )[a] == ' ' || ED( i )[a] == '\t' || ED( i )[a] == '@'; a++ )
 				;
 			if ( !f && !( f = fopen( journal, "a" ) ) ) {
 				char msg[120];
 				sprintf( msg, "%s %s", T( "WriteError" ), journal );
 				fail( msg );
 			}
-			fprintf( f, "%s|%.*s\n", prog, e - a, ed[i] + a );
-			sprintf( line, "%.*s%s%s", a, ed[i], prog, ed[i] + e );
-			free( ed[i] );
-			ed[i] = str_dup( line );
+			fprintf( f, "%s|%.*s\n", prog, e - a, ED( i ) + a );
+			sprintf( line, "%.*s%s%s", a, ED( i ), prog, ED( i ) + e );
+			ed_set( i, line );
 		}
 	}
 	if ( f )
@@ -420,12 +472,11 @@ static void ed_unprogram( void )
 		*old++ = 0;
 		n = strlen( l );
 		for ( i = 0; i < ned; i++ ) {
-			a = line_program( ed[i], &e );
-			if ( e - a == n && !strnicmp( ed[i] + a, l, n ) &&
-				strlen( ed[i] ) + strlen( old ) < sizeof(line) ) {
-				sprintf( line, "%.*s%s%s", a, ed[i], old, ed[i] + e );
-				free( ed[i] );
-				ed[i] = str_dup( line );
+			a = line_program( ED( i ), &e );
+			if ( e - a == n && !strnicmp( ED( i ) + a, l, n ) &&
+				strlen( ED( i ) ) + strlen( old ) < sizeof(line) ) {
+				sprintf( line, "%.*s%s%s", a, ED( i ), old, ED( i ) + e );
+				ed_set( i, line );
 				break;
 			}
 		}
@@ -445,14 +496,13 @@ static void ed_unextend( const char *section )
 			continue;
 		strip( n, x );
 		for ( i = 0; i < ned; i++ )
-			if ( contains_any( ed[i], m ) && contains( ed[i], x ) && !is_rem( ed[i] ) ) {
-				strcpy( line, ed[i] );
+			if ( contains_any( ED( i ), m ) && contains( ED( i ), x ) && !is_rem( ED( i ) ) ) {
+				strcpy( line, ED( i ) );
 				strip( line, x );
 				if ( *n && !stricmp( line, n ) )
 					ed_delete( i-- );
 				else {
-					free( ed[i] );
-					ed[i] = str_dup( line );
+					ed_set( i, line );
 				}
 			}
 	}
@@ -558,9 +608,9 @@ static void ed_add_dos( const char *section, int isconfig )
 		ed_program( section );   /* before Extend= looks for the program */
 	if ( isconfig ) {
 		for ( i = 0; i < ned; i++ ) {
-			if ( !strnicmp( ed[i], "[menu]", 6 ) )
+			if ( !strnicmp( ED( i ), "[menu]", 6 ) )
 				menu = 1;
-			if ( !strnicmp( ed[i], "[common]", 8 ) )
+			if ( !strnicmp( ED( i ), "[common]", 8 ) )
 				common = i;
 		}
 	}
@@ -570,20 +620,20 @@ static void ed_add_dos( const char *section, int isconfig )
 			ed_insert( ned, "[common]" );
 			at = ned;
 		} else {
-			for ( at = common + 1; at < ned && ed[at][0] != '['; at++ );
+			for ( at = common + 1; at < ned && ED( at )[0] != '['; at++ );
 			if ( top )
 				at = common + 1;
 		}
 	} else if ( top ) {
 		at = 0;
-		while ( at < ned && ( !strnicmp( ed[at], "@ECHO", 5 ) ) )
+		while ( at < ned && ( !strnicmp( ED( at ), "@ECHO", 5 ) ) )
 			at++;
 	} else {
 		at = ned;
 		if ( !isconfig )   /* the program, not an argument (WIN C:\APP.EXE) */
 			for ( i = 0; i < ned; i++ ) {
-				int e, a = line_program( ed[i], &e );
-				if ( !is_rem( ed[i] ) && program_is( ed[i] + a, e - a, "WIN" ) ) {
+				int e, a = line_program( ED( i ), &e );
+				if ( !is_rem( ED( i ) ) && program_is( ED( i ) + a, e - a, "WIN" ) ) {
 					at = i;
 					break;
 				}
@@ -601,12 +651,11 @@ static void ed_add_dos( const char *section, int isconfig )
 		if ( !( t = cond_new( section, "Extend", v ) ) || ext_split( t, m, x, n ) )
 			continue;
 		for ( i = 0; i < ned; i++ )
-			if ( contains_any( ed[i], m ) && !is_rem( ed[i] ) ) {
+			if ( contains_any( ED( i ), m ) && !is_rem( ED( i ) ) ) {
 				found = 1;
-				if ( !contains( ed[i], x ) && strlen( ed[i] ) + strlen( x ) < sizeof(line) ) {
-					sprintf( line, "%s%s", ed[i], x );
-					free( ed[i] );
-					ed[i] = str_dup( line );
+				if ( !contains( ED( i ), x ) && strlen( ED( i ) ) + strlen( x ) < sizeof(line) ) {
+					sprintf( line, "%s%s", ED( i ), x );
+					ed_set( i, line );
 				}
 			}
 		if ( !found && *n )
@@ -621,9 +670,9 @@ static int ini_find_line( const char *hdr, const char *text )
 {
 	int i, in = 0;
 	for ( i = 0; i < ned; i++ ) {
-		if ( ed[i][0] == '[' )
-			in = !strnicmp( ed[i], hdr, strlen( hdr ) );
-		else if ( in && !stricmp( ed[i], text ) )
+		if ( ED( i )[0] == '[' )
+			in = !strnicmp( ED( i ), hdr, strlen( hdr ) );
+		else if ( in && !stricmp( ED( i ), text ) )
 			return i;
 	}
 	return -1;
@@ -654,15 +703,15 @@ static void ed_add_ini( void )
 			fail( msg );
 		}
 		fprintf( f, "%s|%s\n", sec, line );
-		for ( i = 0; i < ned && strnicmp( ed[i], hdr, strlen( hdr ) ); i++ );
+		for ( i = 0; i < ned && strnicmp( ED( i ), hdr, strlen( hdr ) ); i++ );
 		if ( i == ned ) {
 			ed_insert( ned, "" );
 			ed_insert( ned, hdr );
 			i = ned - 1;
 		}
 		/* at the end of the section (before empty lines and the next one) */
-		for ( i++; i < ned && ed[i][0] != '['; i++ );
-		while ( i > 0 && !ed[i - 1][0] )
+		for ( i++; i < ned && ED( i )[0] != '['; i++ );
+		while ( i > 0 && !ED( i - 1 )[0] )
 			i--;
 		ed_insert( i, line );
 	}
@@ -730,8 +779,7 @@ static void ed_change_ini( void )
 			fail( msg );
 		}
 		fprintf( f, "%s|%s|%s\n", sec, old, line );
-		free( ed[i] );
-		ed[i] = str_dup( line );
+		ed_set( i, line );
 	}
 	if ( f )
 		fclose( f );
@@ -756,8 +804,7 @@ static int ed_unchange_ini( void )
 		sprintf( line, "%.255s", b + 1 );
 		sprintf( hdr, "[%s]", sec );
 		if ( ( i = ini_find_line( hdr, line ) ) >= 0 ) {
-			free( ed[i] );
-			ed[i] = str_dup( old );
+			ed_set( i, old );
 		}
 	}
 	fclose( f );
@@ -807,15 +854,15 @@ int ini_find_key( const char *section, const char *key, int *end )
 	int i, inside = 0, found = -1;
 	*end = -1;
 	for ( i = 0; i < ned; i++ ) {
-		if ( ini_is_header( ed[i] ) ) {
+		if ( ini_is_header( ED( i ) ) ) {
 			if ( inside ) {
 				*end = i;
 				break;
 			}
-			inside = ini_header_is( ed[i], section );
+			inside = ini_header_is( ED( i ), section );
 			continue;
 		}
-		if ( inside && ini_key_is( ed[i], key ) ) {
+		if ( inside && ini_key_is( ED( i ), key ) ) {
 			if ( found >= 0 )
 				return -2;
 			found = i;
@@ -1021,18 +1068,17 @@ static int ed_set_ini( const char *ini_section )
 		}
 		present = index >= 0;
 		if ( record && fprintf( file, "%s\n%s\n%d\n%s\n%s\n", section, key,
-			present, present ? ed[index] : "", line ) < 0 )
+			present, present ? ED( index ) : "", line ) < 0 )
 			goto error;
 		if ( present ) {
-			free( ed[index] );
-			ed[index] = str_dup( line );
+			ed_set( index, line );
 		} else if ( end >= 0 ) {
-			while ( end > 0 && !ed[end - 1][0] )
+			while ( end > 0 && !ED( end - 1 )[0] )
 				end--;
 			ed_insert( end, line );
 		} else {
 			sprintf( header, "[%s]", section );
-			if ( ned && ed[ned - 1][0] )
+			if ( ned && ED( ned - 1 )[0] )
 				ed_insert( ned, "" );
 			ed_insert( ned, header );
 			ed_insert( ned, line );
@@ -1055,17 +1101,17 @@ static void ed_drop_empty_section( const char *section )
 	char header[44];
 	int i, j;
 	sprintf( header, "[%s]", section );
-	for ( i = 0; i < ned && stricmp( ed[i], header ); i++ )
+	for ( i = 0; i < ned && stricmp( ED( i ), header ); i++ )
 		;
 	if ( i == ned )
 		return;
-	for ( j = i + 1; j < ned && ed[j][0] != '['; j++ )
-		if ( ed[j][0] )
+	for ( j = i + 1; j < ned && ED( j )[0] != '['; j++ )
+		if ( ED( j )[0] )
 			return;
 	while ( j > i + 1 )
 		ed_delete( --j );
 	ed_delete( i );
-	if ( i > 0 && i == ned && !ed[i - 1][0] )
+	if ( i > 0 && i == ned && !ED( i - 1 )[0] )
 		ed_delete( i - 1 );
 }
 
@@ -1097,10 +1143,9 @@ static int ed_restore_ini( char *journal, const char *ini_section )
 		if ( index == -2 )
 			goto error;
 		/* Preserve an administrator's later change instead of overwriting it. */
-		if ( index >= 0 && !strcmp( ed[index], newline ) ) {
+		if ( index >= 0 && !strcmp( ED( index ), newline ) ) {
 			if ( present ) {
-				free( ed[index] );
-				ed[index] = str_dup( oldline );
+				ed_set( index, oldline );
 			} else {
 				ed_delete( index );
 				ed_drop_empty_section( section );
@@ -1462,17 +1507,16 @@ static void ini_set_all( void )
 				fail( T( "IniDefinition" ) );
 		}
 		fprintf( file, "%s\n%s\n%s\n%d\n%s\n%s\n", path, section, key,
-			index >= 0, index >= 0 ? ed[index] : "", line );
+			index >= 0, index >= 0 ? ED( index ) : "", line );
 		if ( index >= 0 ) {
-			free( ed[index] );
-			ed[index] = str_dup( line );
+			ed_set( index, line );
 		} else if ( end >= 0 ) {
-			while ( end > 0 && !ed[end - 1][0] )
+			while ( end > 0 && !ED( end - 1 )[0] )
 				end--;
 			ed_insert( end, line );
 		} else {
 			sprintf( header, "[%s]", section );
-			if ( ned && ed[ned - 1][0] )
+			if ( ned && ED( ned - 1 )[0] )
 				ed_insert( ned, "" );
 			ed_insert( ned, header );
 			ed_insert( ned, line );
@@ -1516,11 +1560,10 @@ static void ini_restore_all( void )
 		}
 		index = ini_find_key( l[1], l[2], &end );
 		/* a value changed after the installation stays */
-		if ( index < 0 || strcmp( ed[index], l[5] ) )
+		if ( index < 0 || strcmp( ED( index ), l[5] ) )
 			continue;
 		if ( l[3][0] == '1' ) {
-			free( ed[index] );
-			ed[index] = str_dup( l[4] );
+			ed_set( index, l[4] );
 		} else {
 			ed_delete( index );
 			ed_drop_empty_section( l[1] );
