@@ -299,21 +299,48 @@ static int scr_text( int x, int y, int w, int h, int attr, const char *s, int dr
 	return line;
 }
 
-/* the button at the click (buttons centered in row y, as drawn by
+/* the buttons in rows that fit a window of w columns (seven languages do
+ * not fit one row): row r holds the buttons first[r] to first[r + 1] - 1;
+ * returns the number of rows, each two lines high with its shadow */
+static int button_rows( int w, const char **labels, int n, int *first )
+{
+	int i, rows = 0, used = 0;
+	for ( i = 0; i < n; i++ ) {
+		int l = strlen( labels[i] ) + 6;
+		if ( !i || used + l - 2 > w - 4 ) {
+			first[rows++] = i;
+			used = 0;
+		}
+		used += l;
+	}
+	first[rows] = n;
+	return rows;
+}
+
+/* the column of the first button of row r, centered */
+static int row_x( int x, int w, const char **labels, const int *first, int r )
+{
+	int i, total = 0;
+	for ( i = first[r]; i < first[r + 1]; i++ )
+		total += strlen( labels[i] ) + 6;
+	return x + ( w - total + 2 ) / 2;
+}
+
+/* the button at the click (buttons centered in rows from y on, as drawn by
  * scr_buttons and scr_view) or -1 */
 static int button_hit( int y, int x, int w, const char **labels, int n )
 {
-	int i, total = 0, cx;
-	if ( my != y )
-		return -1;
-	for ( i = 0; i < n; i++ )
-		total += strlen( labels[i] ) + 6;
-	cx = x + ( w - total + 2 ) / 2;
-	for ( i = 0; i < n; i++ ) {
-		int l = strlen( labels[i] );
-		if ( mx >= cx && mx < cx + l + 4 )
-			return i;
-		cx += l + 6;
+	int i, r, cx, first[17], rows = button_rows( w, labels, n > 16 ? 16 : n, first );
+	for ( r = 0; r < rows; r++ ) {
+		if ( my != y + 2 * r )
+			continue;
+		cx = row_x( x, w, labels, first, r );
+		for ( i = first[r]; i < first[r + 1]; i++ ) {
+			int l = strlen( labels[i] );
+			if ( mx >= cx && mx < cx + l + 4 )
+				return i;
+			cx += l + 6;
+		}
 	}
 	return -1;
 }
@@ -322,15 +349,19 @@ static int button_hit( int y, int x, int w, const char **labels, int n )
  * -1 for Esc.  Keys: Tab/arrows, Enter, the first letter of a button */
 static int scr_buttons( int y, int x, int w, const char **labels, int n, int sel )
 {
-	int i, k;
+	int i, k, r, first[17], rows;
+	if ( n > 16 )
+		n = 16;
+	rows = button_rows( w, labels, n, first );
 	for ( ;; ) {
-		int total = 0, cx;
-		for ( i = 0; i < n; i++ )
-			total += strlen( labels[i] ) + 4 + 2;
-		cx = x + ( w - total + 2 ) / 2;
-		for ( i = 0; i < n; i++ ) {
+		int cx = 0;
+		for ( r = 0, i = 0; i < n; i++ ) {
 			char b[40];
 			int l = strlen( labels[i] );
+			if ( i == first[r] ) {   /* a new row */
+				cx = row_x( x, w, labels, first, r );
+				y += 2 * !!r++;
+			}
 			b[0] = ' ';
 			b[1] = i == sel ? 0xAE : ' ';
 			memcpy( b + 2, labels[i], l );
@@ -342,6 +373,7 @@ static int scr_buttons( int y, int x, int w, const char **labels, int n, int sel
 			vram[y * COLS + cx + l + 4] = ( ( vram[y * COLS + cx + l + 4] & 0xF000 ) ) | 0xDC;
 			cx += l + 4 + 2;
 		}
+		y -= 2 * ( rows - 1 );
 		k = scr_key();
 		if ( k == K_CLICK && ( i = button_hit( y, x, w, labels, n ) ) >= 0 )
 			return i;
@@ -363,22 +395,23 @@ static int scr_buttons( int y, int x, int w, const char **labels, int n, int sel
 /* message window with buttons; returns the chosen button or -1 */
 static int scr_message( const char *title, const char *text, const char **buttons, int n, int sel, int error )
 {
-	int w = 60, lines = scr_text( 0, 0, w - 4, 99, 0, text, 0 ), h, x, y;
-	int attr = error ? A_ERROR : A_WIN;
+	int w = 60, lines = scr_text( 0, 0, w - 4, 99, 0, text, 0 ), h, x, y, first[17];
+	int attr = error ? A_ERROR : A_WIN, rows;
 	if ( lines > 12 ) {   /* long texts: wider, at most between the bars */
 		w = COLS - 4;
 		lines = scr_text( 0, 0, w - 4, 99, 0, text, 0 );
 	}
 	if ( lines > ROWS - 8 )
 		lines = ROWS - 8;
-	h = lines + 6;
+	rows = button_rows( w, buttons, n > 16 ? 16 : n, first );
+	h = lines + 4 + 2 * rows;
 	x = ( COLS - w ) / 2;
 	y = ( ROWS - h ) / 2;
 	if ( y < 1 )
 		y = 1;
 	scr_window( x, y, w, h, attr, title );
 	scr_text( x + 2, y + 2, w - 4, lines, error ? attr : A_WINTXT, text, 1 );
-	return scr_buttons( y + h - 3, x, w, buttons, n, sel );
+	return scr_buttons( y + lines + 3, x, w, buttons, n, sel );
 }
 
 /* line editor in a window; returns 0 = Enter, -1 = Esc */
