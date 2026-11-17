@@ -1,7 +1,7 @@
 /* gdi.h - GeosOne Dual Installer
  * Copyright (C) 2026 GeosOne.  GNU General Public License version 3. */
 
-#define GDI_VERSION "1.16.4"
+#define GDI_VERSION "1.16.5"
 
 /* a line of a text file and the array of lines, both on the far heap */
 typedef char __far *fline;
