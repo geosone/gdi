@@ -102,6 +102,21 @@ const char *gdi_text_name( void )
 	return name;
 }
 
+const char *gdi_local( const char *section )
+{
+	static char name[2][32];   /* two at a time: gdi_setup() and a caller */
+	static int n;
+	const char *v;
+	char *s = name[n ^= 1];
+	sprintf( s, "%.12s.%.18s", section, gdi_text_name() );
+	return ini_text( s, 0, &v ) >= 0 ? s : section;
+}
+
+const char *gdi_setup( const char *key, const char *def )
+{
+	return ini_get( gdi_local( "Setup" ), key, ini_get( "Setup", key, def ) );
+}
+
 const char *gdi_text( const char *key )
 {
 	char *v = (char *)ini_get( "Text", key, NULL ), *p;

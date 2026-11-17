@@ -337,7 +337,7 @@ static void read_package( void )
     sprintf( setup_title, "%.79s", ini_get( "Setup", "Title", "Setup" ) );
     sprintf( product, "%.99s", ini_get( "Setup", "Product", "GDI package" ) );
     welcome_text[0] = 0;
-    while ( ( pos = ini_text( "Welcome", pos, &value ) ) >= 0 &&
+    while ( ( pos = ini_text( gdi_local( "Welcome" ), pos, &value ) ) >= 0 &&
             strlen( welcome_text ) + strlen( value ) < sizeof(welcome_text) - 3 ) {
         if ( !*value )
             strcat( welcome_text, "\r\n\r\n" );
@@ -362,7 +362,7 @@ static void read_package( void )
     has_automatic = 0;
     pos = 0;
     while ( option_count < MAXOPT &&
-            ( pos = ini_next( "Options", "Option", pos, &value ) ) >= 0 ) {
+            ( pos = ini_next( gdi_local( "Options" ), "Option", pos, &value ) ) >= 0 ) {
         bar = strchr( value, '|' );
         if ( ( *value == '?' || ( *value == '!' && value[1] == '?' ) ) && bar ) {
             option_on[option_count] = 2;  /* automatic: DOS engine detects */

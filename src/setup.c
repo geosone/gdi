@@ -266,7 +266,7 @@ static int extra_install( const char *dir, const char *want, const char *label )
 			static const char *ok[1];
 			ok[0] = T( "OK" );
 			ui_message( T( "DoneTitle" ),
-				ini_get( "Setup", "Done", T( "DoneText" ) ), ok, 1, 0, 0 );
+				gdi_setup( "Done", T( "DoneText" ) ), ok, 1, 0, 0 );
 		}
 	}
 	in_extra = 0;

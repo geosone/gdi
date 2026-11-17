@@ -44,4 +44,15 @@ printf '%s\n' "$work_dir/need/INSTALL.INI" \
 	'line 3: condition ?MISSING: not in [Find] or [Detect]' \
 	'line 4: Need=no condition: no condition|message' \
 	'2 problems' | diff - "$work_dir/need.out"
+# [Setup.German], [Welcome.German], [Options.German]: the same options
+mkdir "$work_dir/local"
+printf '[Setup]\r\nDone=Done.\r\n[Setup.German]\r\nDone=Fertig.\r\nTitle=x\r\n[Welcome.German]\r\nWillkommen\r\n[Options]\r\nOption=on|A\r\nOption=?LFN|B\r\n[Options.German]\r\nOption=off|A\r\n[Detect]\r\nLFN=CHK.COM\r\n[Options.French]\r\nOption=on|A\r\nOption=?LFN|B\r\n' \
+	> "$work_dir/local/INSTALL.INI"
+: > "$work_dir/local/CHK.COM"
+"$work_dir/gdicheck" "$work_dir/local/INSTALL.INI" > "$work_dir/local.out" && exit 1
+printf '%s\n' "$work_dir/local/INSTALL.INI" \
+	'line 5: [Setup.German] takes Done= and License1= ...: not Title=' \
+	'line 12: Option=off|A: not as in [Options]' \
+	'line 13: [Options.German] lists other options than [Options]' \
+	'3 problems' | diff - "$work_dir/local.out"
 echo "check tests passed"

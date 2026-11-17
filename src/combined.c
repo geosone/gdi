@@ -578,7 +578,7 @@ void finish( void )
 	b[1] = T( "ShowReadme" );
 	rc = ui_message( T( "DoneTitle" ),
 		uninstall ? T( "UninstDone" )
-		          : ini_get( "Setup", "Done", T( "DoneText" ) ),
+		          : gdi_setup( "Done", T( "DoneText" ) ),
 		b, readme && !uninstall ? 2 : 1, 0, 0 );
 	if ( rc == 1 ) {
 		static const char *ok[1];

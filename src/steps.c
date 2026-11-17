@@ -359,7 +359,7 @@ void license( void )
 				if ( ++count > 9 )
 					fail( T( "LicenseLimit" ) );
 				sprintf( key, "License%d", number );
-				value = ini_get( "Setup", key, NULL );
+				value = gdi_setup( key, NULL );
 				if ( !value ) {
 					sprintf( msg, "%s %s", T( "MissingLicense" ), key );
 					fail( msg );
@@ -380,11 +380,12 @@ void welcome( void )
 	static char text[1200];
 	static const char *b[2];
 	int pos = 0;
+	const char *section = gdi_local( "Welcome" );
 	b[0] = T( "Continue" );
 	b[1] = T( "Exit" );
 	text[0] = 0;
 	/* the lines of a paragraph are joined, empty lines separate paragraphs */
-	while ( ( pos = ini_text( "Welcome", pos, &v ) ) >= 0 && strlen( text ) + strlen( v ) < sizeof(text) - 3 ) {
+	while ( ( pos = ini_text( section, pos, &v ) ) >= 0 && strlen( text ) + strlen( v ) < sizeof(text) - 3 ) {
 		size_t l = strlen( text );
 		if ( !*v ) {
 			if ( l && text[l - 1] != '\n' )
@@ -407,7 +408,8 @@ void read_options( void )
 {
 	const char *v;
 	int pos = 0;
-	while ( nopt < MAXOPT && ( pos = ini_next( "Options", "Option", pos, &v ) ) >= 0 ) {
+	const char *section = gdi_local( "Options" );
+	while ( nopt < MAXOPT && ( pos = ini_next( section, "Option", pos, &v ) ) >= 0 ) {
 		/* Option=on|Label|value or ?NAME|Label: %On% expands to value */
 		const char *bar = strchr( v, '|' ), *bar2;
 		static char labels[MAXOPT][70];

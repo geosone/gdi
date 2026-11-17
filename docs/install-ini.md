@@ -93,6 +93,7 @@ Accept=Akzeptieren
 | `[Files]`, `[Dirs]`, `[Run]` | copying, directories, programs | this chapter |
 | `[Languages]` | an application language choice | this chapter |
 | `[Text]` | translations of the installer texts | this chapter |
+| `[Setup.German]`, `[Welcome.German]`, `[Options.German]` | the package's own texts in the language of the installer | this chapter |
 | `[Config.sys]`, `[Autoexec.bat]` | DOS configuration | [System files](system-files.md) |
 | `[System.ini]`, `[Win.ini]`, `[Ini]`, `[ProgMan]` | Windows 3.x configuration, any INI file | [System files](system-files.md) |
 | `[HexPatch]` | checked binary patches | [Binary patches](binary-patches.md) |
@@ -311,6 +312,29 @@ texts for a package, with the keys of `src/language.ini`, for example
 `WelcomeTitle`, `LicenseTitle`, `Accept`, `Decline`, `DirTitle`, `DirText`,
 `OptionsTitle`, `SumTitle`, `Install`, `Cancel`, `DoneTitle`, `DoneText`,
 `KeysMsg`, `NeedDos`; `\n` is a new line.
+
+A package translates its own texts with sections named after a section of
+`src/language.ini`: when the installer shows its texts in German,
+`[Welcome.German]` takes the place of `[Welcome]` and `[Options.German]`
+that of `[Options]`, and `[Setup.German]` gives `Done=` and the names of
+`License1=` ... `License9=`; the rest, and every language without such a
+section, comes from the plain sections. `[Options.German]` lists the same
+options in the same order, each with the same `on|`, `off|` or `?NAME|`
+(`INSTALL /CHECK` compares them); only the labels differ. Like the rest of
+`INSTALL.INI` the texts are in the DOS code page.
+
+```ini
+[Setup.German]
+License3=Dateidialog-Hook und ZIP-Vorschau|LICENSES\GPL3.TXT
+Done=Calmira Reloaded ist installiert.
+
+[Welcome.German]
+Calmira Reloaded ist ein Desktop im Stil von Windows 95 ...
+
+[Options.German]
+Option=?FAT32|WIN386.EXE von Windows 3.1/3.11 fuer FAT32 anpassen
+Option=on|Calmira als Windows-Shell verwenden
+```
 
 ## Without questions: INSTALL /S
 

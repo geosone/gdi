@@ -18,6 +18,8 @@
 #define INILINES  400   /* ini.c MAXLINES */
 
 static char (*names)[24];   /* of [Find] and [Detect], MAXNAMES */
+static char (*flags)[24];   /* on|, off|, ?NAME| of [Options], MAXOPTS */
+#define MAXOPTS   16
 static int nnames, nopts, problems;
 static void (*report)( const char *text );
 static char *dir;   /* of the INI, 160 */
@@ -236,17 +238,19 @@ int gdi_check( const char *ini, void (*out)( const char *text ) )
 {
 	char *buf;
 	FILE *f;
-	char section[40], *s, *e, *slash;
+	char section[40], lname[40], *s, *e, *slash;
 	int pass, cur, kept, archive = 0, disks = 0, long_line, any;
+	int local = 0, lopts = -1;   /* [Options.German]: its options so far */
 	report = out;
 	problems = nnames = nopts = 0;
 	/* not in the data segment of INSTALL.EXE: only /CHECK needs them */
 	names = malloc( MAXNAMES * sizeof(*names) );
+	flags = malloc( MAXOPTS * sizeof(*flags) );
 	dir = malloc( 160 );
 	buf = malloc( LINESIZE );
-	if ( !names || !dir || !buf ) {
+	if ( !names || !flags || !dir || !buf ) {
 		out( "not enough memory" );
-		free( names ), free( dir ), free( buf );
+		free( names ), free( flags ), free( dir ), free( buf );
 		return 1;
 	}
 	sprintf( dir, "%.159s", ini );
@@ -261,10 +265,10 @@ int gdi_check( const char *ini, void (*out)( const char *text ) )
 		if ( ( f = fopen( ini, "r" ) ) == NULL ) {
 			sprintf( buf, "%.200s: not found", ini );
 			out( buf );
-			free( names ), free( dir ), free( buf );
+			free( names ), free( flags ), free( dir ), free( buf );
 			return 1;
 		}
-		cur = -1;
+		cur = lopts = -1;
 		kept = lineno = long_line = any = 0;
 		*section = 0;
 		while ( fgets( buf, LINESIZE, f ) ) {
@@ -286,6 +290,9 @@ int gdi_check( const char *ini, void (*out)( const char *text ) )
 				problem( "more than %s lines without comments: Setup ignores the rest%s", "400", "" );
 			if ( *s == '[' ) {
 				any = 1;
+				if ( pass && lopts >= 0 && lopts != nopts )
+					problem( "[%s] lists other options than [Options]%s", lname, "" );
+				lopts = -1;
 				if ( ( e = strchr( s, ']' ) ) == NULL ) {
 					if ( pass )
 						problem( "no ] in the section name %s%s", s, "" );
@@ -293,6 +300,17 @@ int gdi_check( const char *ini, void (*out)( const char *text ) )
 				}
 				*e = 0;
 				sprintf( section, "%.39s", s + 1 );
+				/* [Setup.German], [Welcome.German], [Options.German]: the
+				   package's texts for the language of the installer */
+				local = ( e = strrchr( section, '.' ) ) != NULL &&
+					( same_n( section, "Setup.", 6 ) || same_n( section, "Welcome.", 8 ) ||
+					  same_n( section, "Options.", 8 ) ) && e[1];
+				if ( local ) {
+					strcpy( lname, section );
+					*e = 0;
+					if ( same( section, "Options" ) )
+						lopts = 0;
+				}
 				for ( cur = 0; sections[cur] && !same( sections[cur], section ); cur++ )
 					;
 				if ( !sections[cur] ) {
@@ -314,8 +332,12 @@ int gdi_check( const char *ini, void (*out)( const char *text ) )
 					s[6] == '=' && strchr( e, '|' ) && nnames < MAXNAMES ) {
 					sprintf( names[nnames], "@%.*s", (int)( strchr( e, '|' ) - e - 1 > 22 ? 22 : strchr( e, '|' ) - e - 1 ), e + 1 );
 					trim( names[nnames++] );
-				} else if ( same( section, "Options" ) && e && same_n( s, "Option", 6 ) && s[6] == '=' )
+				} else if ( same( section, "Options" ) && !local && e && same_n( s, "Option", 6 ) &&
+					s[6] == '=' ) {
+					if ( nopts < MAXOPTS )
+						sprintf( flags[nopts], "%.23s", e + 1 );
 					nopts++;
+				}
 				else if ( same( section, "Setup" ) && e && same_n( s, "Archive", 7 ) && s[7] == '=' )
 					archive = 1;
 				else if ( same( section, "Disks" ) )
@@ -338,6 +360,8 @@ int gdi_check( const char *ini, void (*out)( const char *text ) )
 				}
 				e++;
 				if ( same( section, "Setup" ) ) {
+					if ( local && !same( key, "Done" ) && !same_n( key, "License", 7 ) )
+						problem( "[%s] takes Done= and License1= ...: not %s=", lname, key );
 					if ( same( key, "Readme" ) )
 						need_file( e, "Readme" );
 					else if ( same_n( key, "License", 7 ) && key[7] && strchr( e, '|' ) )
@@ -352,6 +376,11 @@ int gdi_check( const char *ini, void (*out)( const char *text ) )
 				}
 				if ( same( section, "Options" ) ) {
 					const char *bar = strchr( e, '|' );
+					if ( local && ( lopts >= nopts || lopts >= MAXOPTS || !bar || bar - e > 22 ||
+						strncmp( flags[lopts], e, bar - e + 1 ) ) )
+						problem( "Option=%s: not as in [Options]%s", e, "" );
+					if ( local )
+						lopts++;
 					if ( !bar )
 						problem( "Option=%s: no on|, off| or ?NAME|%s", e, "" );
 					else if ( *e == '?' || ( *e == '!' && e[1] == '?' ) ) {
@@ -408,8 +437,10 @@ int gdi_check( const char *ini, void (*out)( const char *text ) )
 				need_file( condition( s + 7 ), "[Registry] Import" );
 		}
 		fclose( f );
+		if ( pass && lopts >= 0 && lopts != nopts )
+			problem( "[%s] lists other options than [Options]%s", lname, "" );
 	}
-	free( names ), free( dir ), free( buf );
+	free( names ), free( flags ), free( dir ), free( buf );
 	return problems;
 }
 

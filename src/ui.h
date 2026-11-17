@@ -29,6 +29,11 @@ const char *gdi_text( const char *key );
 int  gdi_text_language( const char *name );
 /* the name of the section in use */
 const char *gdi_text_name( void );
+/* [Section.German]: the package's own section for the language of the
+ * installer texts when it has one, else [Section] (Welcome, Options) */
+const char *gdi_local( const char *section );
+/* a key of [Setup.German], else of [Setup] (Done=, License1=, ...) */
+const char *gdi_setup( const char *key, const char *def );
 /* forget the texts in use (the Windows frontend changes the code page) */
 void gdi_text_reset( void );
 /* the section for an sLanguage= or a country code of a Windows; -1: none */
