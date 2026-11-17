@@ -21,6 +21,7 @@
 static char *line[MAXLINES];
 static int   sect[MAXLINES];     /* index of the section header line */
 static int   nline;
+int ini_lean;       /* INSTALL /U, /M: without the texts only a setup shows */
 #ifdef __WINDOWS__
 int ini_keep_oem;   /* the installer core: INSTALL.INI stays in the DOS code page */
 #endif
@@ -107,12 +108,15 @@ int ini_load( const char *path )
 {
 	FILE *f = fopen( path, "r" );
 	char buf[512];   /* long [Welcome] lines */
-	int cur = -1;
+	int cur = -1, skip = 0;
 	if ( !f )
 		return -1;
 	while ( nline < MAXLINES && fgets( buf, sizeof(buf), f ) ) {
 		char *s = trim( buf );
-		if ( *s == ';' || ( !*s && cur < 0 ) )
+		if ( *s == '[' )   /* [Welcome], [Welcome.German], [Options.German], [Setup.German] */
+			skip = ini_lean && ( !strnicmp( s, "[Welcome", 8 ) ||
+				!strnicmp( s, "[Options.", 9 ) || !strnicmp( s, "[Setup.", 7 ) );
+		if ( *s == ';' || ( !*s && cur < 0 ) || skip )
 			continue;   /* empty lines are kept for ini_text() */
 #ifdef __WINDOWS__
 		if ( !ini_keep_oem )

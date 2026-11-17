@@ -138,6 +138,8 @@ int main( int argc, char **argv )
 		printf( n ? "%d problems\n" : "no problems\n", n );
 		return n != 0;
 	}
+	/* the near heap is short when INSTALL /U edits the system files */
+	ini_lean = uninstall || manage;
 	if ( ini_load( ini ) ) {
 		printf( "INSTALL: %s not found\n", ini );
 		return 2;

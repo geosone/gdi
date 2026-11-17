@@ -17,6 +17,7 @@ int         ini_next( const char *section, const char *key, int pos, const char 
 int         ini_lines( const char *section, int pos, const char **line );
 int         ini_text( const char *section, int pos, const char **line );
 void        ini_package_id( char *out, unsigned size );
+extern int  ini_lean;       /* leave out [Welcome] and the sections of a language */
 #ifdef __WINDOWS__
 extern int  ini_keep_oem;   /* do not convert INSTALL.INI to ANSI when loading */
 #endif
