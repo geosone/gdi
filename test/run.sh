@@ -263,9 +263,9 @@ if [ -n "${EXTRAS:-}" ]; then
     # the system stays
     mcopy -o -i "$P" ::/AUTOEXEC.BAT "$OUT/AUTOEXEC.NEW" || exit 1
     if [ "$EXTRAS" = none ]; then
-        grep -qi '^PATH' "$OUT/AUTOEXEC.NEW" && { echo "PATH added"; exit 1; }
+        grep -qiE '^(SET )?PATH' "$OUT/AUTOEXEC.NEW" && { echo "PATH added"; exit 1; }
     else
-        tr -d '\r' < "$OUT/AUTOEXEC.NEW" | grep -qx 'PATH %PATH%;A:\\SHARED' || { echo "PATH line missing"; cat "$OUT/AUTOEXEC.NEW"; exit 1; }
+        tr -d '\r' < "$OUT/AUTOEXEC.NEW" | grep -qx 'SET PATH=%PATH%;A:\\SHARED' || { echo "PATH line missing"; cat "$OUT/AUTOEXEC.NEW"; exit 1; }
     fi
     echo "DOS [Extras] integration passed"
 fi

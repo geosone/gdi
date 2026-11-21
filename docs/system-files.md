@@ -43,10 +43,11 @@ Replace=yes                     ; write a new file (the old one is kept as backu
   that the programs of the package start from any directory (DOS, and the
   DOS boxes of Windows 3.x and 9x): it is appended to the last line that
   sets the `PATH` (`PATH x`, `PATH=x`, `SET PATH=x`) unless it is there
-  already; without such a line Setup adds `PATH %PATH%;directory` (the
-  `PATH` Windows 9x sets stays). Tie it to an option, so that the user
-  decides. `INSTALL /U` takes the directory out again, and the line when
-  only `PATH %PATH%` is left; not while another package has its setup
+  already; without such a line Setup adds `SET PATH=%PATH%;directory`
+  (the `PATH` Windows 9x sets stays; `PATH %PATH%;directory` would fail on
+  an empty `PATH`: MS-DOS 7.1 rejects `PATH ;directory`). Tie it to an
+  option, so that the user decides. `INSTALL /U` takes the directory out
+  again, and the line when only `%PATH%` is left; not while another package has its setup
   directory in it (`SetupDir=`, packages sharing a directory).
 - `PathRemove=directory[;directory...]` takes the directories out of every
   `PATH` line (one per line or separated by `;`), at

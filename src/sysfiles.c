@@ -280,8 +280,10 @@ static void ed_add_path( void )
 		for ( last = -1, i = 0; i < ned; i++ )
 			if ( !is_rem( ED( i ) ) && path_value( ED( i ) ) )
 				last = i;
-		if ( last < 0 ) {   /* none: the PATH of the system (Windows 9x) stays */
-			sprintf( line, "PATH %%PATH%%;%s", dir );
+		if ( last < 0 ) {   /* none: the PATH of the system (Windows 9x) stays;
+			 * SET, since "PATH ;dir" (an empty PATH) is "too many parameters"
+			 * for MS-DOS 7.1's COMMAND.COM, which then keeps no PATH at all */
+			sprintf( line, "SET PATH=%%PATH%%;%s", dir );
 			for ( i = 0; i < ned && !strnicmp( ED( i ), "@ECHO", 5 ); i++ )
 				;
 			ed_insert( i, line );
