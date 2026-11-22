@@ -416,7 +416,7 @@ void copy_all( void )
 		if ( cond( v ) )
 			total++;
 	if ( unin )
-		total += 2;
+		total += 3;
 	pos = 0;
 	ui_progress( progtitle, "", 0, total );
 	while ( ( pos = ini_lines( "Files", pos, &v ) ) >= 0 ) {
@@ -458,6 +458,12 @@ void copy_all( void )
 		path_cat( to, jdir, "INSTALL.EXE" );
 		ui_progress( progtitle, "INSTALL.EXE", ++done, total );
 		copy_file( from, to );
+		/* the Windows program, if the package has one */
+		path_cat( from, srcdir, "SETUP.EXE" );
+		path_cat( to, jdir, "SETUP.EXE" );
+		ui_progress( progtitle, "SETUP.EXE", ++done, total );
+		if ( file_exists( from ) )
+			copy_file( from, to );
 		path_cat( from, srcdir, "INSTALL.INI" );
 		path_cat( to, jdir, "INSTALL.INI" );
 		ui_progress( progtitle, "INSTALL.INI", ++done, total );
@@ -751,6 +757,8 @@ static void remove_installed( int rollback )
 		path_cat( p, jdir, "INSTALL.INI" );
 		remove( p );
 		path_cat( p, jdir, "INSTALL.EXE" );
+		remove( p );
+		path_cat( p, jdir, "SETUP.EXE" );
 		remove( p );
 		gdi_remove_dirs( jdir );
 	}

@@ -351,7 +351,8 @@ void runner_path( char *p )
 	path_cat( p, jdir, name );
 }
 
-/* plain DOS with registry entries: the runner (this installer) applies
+/* plain DOS with registry entries: the runner (SETUP.EXE, the Windows
+ * program of the installer) applies
  * REGISTRY.PLN, or restores REGISTRY.LOG after INSTALL /U (UNINST.PND),
  * when Windows starts the next time (run= in WIN.INI) */
 static void post_runner( int add )
@@ -359,7 +360,13 @@ static void post_runner( int add )
 	char from[80], to[80];
 	runner_path( to );
 	if ( add ) {
-		path_cat( from, srcdir, "INSTALL.EXE" );
+		path_cat( from, srcdir, "SETUP.EXE" );
+		if ( !file_exists( from ) && gdi_self ) {   /* a combined setup: its own */
+			char *e;
+			sprintf( from, "%.66s", gdi_self );
+			e = strrchr( from, '\\' );
+			strcpy( e ? e + 1 : from, "SETUP.EXE" );
+		}
 		if ( stricmp( from, to ) && copy_file( from, to ) ) {
 			char msg[160];
 			sprintf( msg, "%s %s -> %s", T( "CopyError" ), from, to );

@@ -1,9 +1,9 @@
 /* wininstall.c - native Windows 3.1/9x frontend for GDI packages.
  *
- * This is the NE half of the dual-mode INSTALL.EXE. The complete DOS
- * installer is its MZ stub, so DOS runs the text installer while Windows
- * loads this frontend. The frontend extracts that stub temporarily when it
- * needs the existing transactional engine; only one installer is shipped.
+ * This is SETUP.EXE, the Windows program of the installer; INSTALL.EXE
+ * next to it is the DOS installer.  The frontend runs a temporary copy
+ * of INSTALL.EXE as the transactional engine; started from DOS, the stub
+ * of SETUP.EXE (stub.c) runs INSTALL.EXE.
  *
  * Copyright (C) 2026 GeosOne. GNU General Public License version 3. */
 
@@ -43,6 +43,7 @@ static int uninstall_mode;   /* 1 /U, 2 /M */
 extern char answer_file[80];   /* core.c: INSTALL /S[:file] */
 extern void (*gdi_removed_hook)( const char *dir );
 static char source_dir[128];
+static char module_dir[128];    /* SETUP.EXE and INSTALL.EXE */
 static char module_path[128];
 static char engine_path[128];
 static char completion_path[128];
@@ -149,6 +150,8 @@ static void delete_uninstaller( void )
     delete_file( path );
     path_cat( path, source_dir, "INSTALL.EXE" );
     delete_file( path );
+    path_cat( path, source_dir, "SETUP.EXE" );
+    delete_file( path );
     {   /* the runners: GDIPxxxx.EXE, GDIPOST.EXE of older versions */
         struct find_t found;
         path_cat( parent, source_dir, "GDIP*.EXE" );
@@ -243,84 +246,37 @@ static int temp_paths( void )
     return *engine_path != 0;
 }
 
-/* Write the MZ part before the NE header to a temporary executable. */
+/* Copy INSTALL.EXE, the DOS engine next to this program, to a temporary
+ * executable: the disk with the package may change while it runs. */
 static int extract_dos_engine( void )
 {
     OFSTRUCT of;
     HFILE input, output;
-    BYTE header[64];
     static BYTE buffer[2048];
-    LONG file_size, stub_size, left, header_size;
-    UINT reloc_count, reloc_offset, reloc_bytes;
-    UINT want, got;
+    char path[128];
+    UINT got = 0;
 
-    input = OpenFile( module_path, &of, OF_READ | OF_SHARE_DENY_WRITE );
+    path_cat( path, module_dir, "INSTALL.EXE" );
+    input = OpenFile( path, &of, OF_READ | OF_SHARE_DENY_WRITE );
     if ( input == HFILE_ERROR )
         return 0;
-    if ( _lread( input, header, sizeof(header) ) != sizeof(header) ||
-         header[0] != 'M' || header[1] != 'Z' ) {
-        _lclose( input );
-        return 0;
-    }
-    stub_size = (LONG)header[0x3c] |
-                ( (LONG)header[0x3d] << 8 ) |
-                ( (LONG)header[0x3e] << 16 ) |
-                ( (LONG)header[0x3f] << 24 );
-    header_size = ( (UINT)header[8] | ( (UINT)header[9] << 8 ) ) * 16L;
-    reloc_count = (UINT)header[6] | ( (UINT)header[7] << 8 );
-    reloc_offset = (UINT)header[0x18] | ( (UINT)header[0x19] << 8 );
-    if ( reloc_count > ( sizeof(buffer) - 0x20 ) / 4 ) {
-        _lclose( input );
-        return 0;
-    }
-    reloc_bytes = reloc_count * 4;
-    file_size = _llseek( input, 0L, 2 );
-    if ( stub_size < (LONG)sizeof(header) || stub_size >= file_size ||
-         header_size < (LONG)sizeof(header) ||
-         header_size > (LONG)sizeof(buffer) ||
-         reloc_offset + reloc_bytes > (UINT)header_size ||
-         0x20 + reloc_bytes > (UINT)header_size ||
-         _llseek( input, 0L, 0 ) < 0 ||
-         _lread( input, buffer, (UINT)header_size ) != (UINT)header_size ) {
-        _lclose( input );
-        return 0;
-    }
-
-    /* Wlink moves the DOS relocation table to 40h and stores the NE offset
-     * at 3Ch. Restore an old-style DOS header so Windows runs the extracted
-     * image as a DOS task rather than looking for an NE header after EOF. */
-    memmove( buffer + 0x20, buffer + reloc_offset, reloc_bytes );
-    buffer[0x18] = 0x20;
-    buffer[0x19] = 0;
-
     if ( !temp_paths() ) {
         _lclose( input );
         return 0;
     }
     output = _lcreat( engine_path, 0 );
-    if ( output == HFILE_ERROR ) {
-        _lclose( input );
-        engine_path[0] = 0;
-        completion_path[0] = 0;
-        registry_plan_path[0] = 0;
-        return 0;
+    if ( output != HFILE_ERROR ) {
+        while ( ( got = _lread( input, buffer, sizeof(buffer) ) ) != 0 && got != (UINT)HFILE_ERROR )
+            if ( _lwrite( output, buffer, got ) != got ) {
+                got = (UINT)HFILE_ERROR;
+                break;
+            }
+        _lclose( output );
     }
-    if ( _lwrite( output, buffer, (UINT)header_size ) != (UINT)header_size ||
-         _llseek( input, header_size, 0 ) < 0 )
-        left = -1;
-    else
-        left = stub_size - header_size;
-    while ( left > 0 ) {
-        want = left > (LONG)sizeof(buffer) ? sizeof(buffer) : (UINT)left;
-        got = _lread( input, buffer, want );
-        if ( got != want || _lwrite( output, buffer, want ) != want )
-            break;
-        left -= want;
-    }
-    _lclose( output );
     _lclose( input );
-    if ( left != 0 ) {
-        delete_file( engine_path );
+    if ( output == HFILE_ERROR || got ) {
+        if ( output != HFILE_ERROR )
+            delete_file( engine_path );
         engine_path[0] = 0;
         completion_path[0] = 0;
         registry_plan_path[0] = 0;
@@ -468,7 +424,7 @@ static void start_dos_setup( HWND window )
     if ( engine_running )
         return;
     if ( !extract_dos_engine() ) {
-        MessageBox( window, "The embedded DOS installation engine could not be extracted.",
+        MessageBox( window, "INSTALL.EXE, the DOS installation engine, was not found next to SETUP.EXE.",
                     setup_title, MB_OK | MB_ICONEXCLAMATION );
         return;
     }
@@ -820,6 +776,7 @@ int PASCAL WinMain( HINSTANCE instance, HINSTANCE previous,
         *slash = 0;
     else
         strcpy( source_dir, "." );
+    strcpy( module_dir, source_dir );
     if ( command_ini( command_line, package_ini, sizeof(package_ini) ) ) {
         strcpy( source_dir, package_ini );
         slash = strrchr( source_dir, '\\' );
@@ -830,7 +787,7 @@ int PASCAL WinMain( HINSTANCE instance, HINSTANCE previous,
     } else
         path_cat( package_ini, source_dir, "INSTALL.INI" );
     if ( ini_load( package_ini ) ) {
-        MessageBox( NULL, "INSTALL.INI was not found next to INSTALL.EXE.",
+        MessageBox( NULL, "INSTALL.INI was not found next to SETUP.EXE.",
                     "GDI", MB_OK | MB_ICONEXCLAMATION );
         release_source_path();
         return 2;

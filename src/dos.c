@@ -17,6 +17,7 @@
 #include <direct.h>
 #include <io.h>
 #include <dos.h>
+#include <conio.h>
 #include <i86.h>
 #include <process.h>
 #include <setjmp.h>
@@ -146,6 +147,28 @@ int main( int argc, char **argv )
 	}
 	if ( language )
 		gdi_text_language( language );
+	/* in Windows the package is installed by SETUP.EXE (which runs this
+	 * program with /W or /P): Windows 9x starts it from here, a DOS box
+	 * of Windows 3.x cannot */
+	if ( !*completion_file && windows_running() ) {
+		static char setup[96];
+		union REGS r;
+		sprintf( setup, "%.80s", argv[0] );
+		s = strrchr( setup, '\\' );
+		strcpy( s ? s + 1 : setup, "SETUP.EXE" );
+		if ( file_exists( setup ) ) {
+			r.x.ax = 0x1600;
+			int86( 0x2F, &r, &r );
+			if ( r.h.al >= 4 && r.h.al != 0x80 && r.h.al != 0xFF ) {
+				argv[0] = setup;
+				if ( spawnv( P_WAIT, setup, (const char * const *)argv ) != -1 )
+					return 0;
+			}
+			printf( "%s\n", T( "RunSetup" ) );
+			getch();
+			return 1;
+		}
+	}
 	if ( *registry_plan_file ) {
 		char registry_error[130];
 		if ( !registry_family ) {

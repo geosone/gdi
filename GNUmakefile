@@ -1,4 +1,4 @@
-# GeosOne Dual Installer (INSTALL.EXE) - GNU make, Open Watcom
+# GeosOne Dual Installer (INSTALL.EXE for DOS, SETUP.EXE for Windows) - GNU make, Open Watcom
 #   make [WATCOM=/opt/watcom]
 WATCOM ?= /opt/watcom
 export WATCOM
@@ -9,7 +9,8 @@ UPX := $(UPX_BUILD)/upx
 
 CC   := $(WATCOM)/binl/wcc
 LINK := $(WATCOM)/binl/wlink
-COPT := -q -bt=dos -mm -0 -os -s -zq -wx -I$(WATCOM)/h -I$(OUT)
+# large model: the lists of a combined setup do not fit a 64 KB data segment
+COPT := -q -bt=dos -ml -zt100 -0 -os -s -zq -wx -I$(WATCOM)/h -I$(OUT)
 WCOPT := -q -bt=windows -ml -zt100 -0 -zW -os -s -zq -w4 -we -I$(WATCOM)/h -I$(WATCOM)/h/win -I$(OUT)
 
 OBJS := $(addprefix $(OUT)/,dos.obj core.obj sysfiles.obj winplan.obj steps.obj files.obj setup.obj combined.obj dossys.obj lang.obj util.obj journal.obj ui_dos.obj ini.obj archive.obj hexpatch.obj regtxn.obj progman.obj check.obj)
@@ -19,12 +20,12 @@ WINOBJS := $(OUT)/wininstall.obj $(OUT)/winnative.obj $(OUT)/winsys.obj $(OUT)/u
 	$(addprefix $(OUT)/w_,$(addsuffix .obj,$(WINCORE))) \
 	$(OUT)/winutil.obj $(OUT)/winjournal.obj $(OUT)/winini.obj $(OUT)/winregtxn.obj $(OUT)/winreg16.obj $(OUT)/wintasks.obj
 DOSIMAGE := $(OUT)/INSTALL.STB
-DOSPACKED := $(OUT)/INSTALL.PST
-WINIMAGE := $(OUT)/INSTALL.UNP
+WINSTUB := $(OUT)/SETUP.STB
+WINIMAGE := $(OUT)/SETUP.UNP
 
 .DELETE_ON_ERROR:
 
-all: $(OUT)/INSTALL.EXE $(OUT)/gdicheck
+all: $(OUT)/INSTALL.EXE $(OUT)/SETUP.EXE $(OUT)/gdicheck
 
 # INSTALL /CHECK for the host: build/gdicheck INSTALL.INI ...
 $(OUT)/gdicheck: src/check.c src/check.h | $(OUT)
@@ -55,10 +56,17 @@ upx:
 	  -DUPX_CONFIG_DISABLE_SELF_PACK_TEST=ON
 	cmake --build $(UPX_BUILD) --target upx
 
-# LZMA: the packed DOS part must stay below 64 KB (the stub of the NE file)
-$(DOSPACKED): $(DOSIMAGE) upx
+# INSTALL.EXE: the DOS installer
+$(OUT)/INSTALL.EXE: $(DOSIMAGE) upx
 	cp $< $@
 	$(UPX) --best --lzma $@
+	$(UPX) -t $@
+
+# the DOS part of SETUP.EXE runs INSTALL.EXE
+$(WINSTUB): src/stub.c | $(OUT)
+	$(CC) -q -bt=dos -ms -0 -os -s -zq -wx -I$(WATCOM)/h -fo=$(OUT)/stub.obj $<
+	$(LINK) option quiet format dos name $@ file $(OUT)/stub.obj \
+	  libpath $(WATCOM)/lib286/dos libpath $(WATCOM)/lib286 option stack=1k
 
 $(OUT)/wininstall.obj: src/wininstall.c src/gdi.h src/wintasks.h | $(OUT)
 	$(CC) $(WCOPT) -fo=$@ $<
@@ -87,13 +95,14 @@ $(OUT)/wintasks.obj: src/wintasks.c src/wintasks.h src/gdi.h | $(OUT)
 $(OUT)/winreg16.obj: src/winreg16.c src/winreg16.h src/regtxn.h src/gdi.h | $(OUT)
 	$(CC) $(WCOPT) -fo=$@ $<
 
-$(WINIMAGE): $(DOSPACKED) $(WINOBJS)
+$(WINIMAGE): $(WINSTUB) $(WINOBJS)
 	$(LINK) option quiet format windows name $@ option map=$(OUT)/INSTALLW.map \
 	  $(foreach o,$(WINOBJS),file $(o)) libpath $(WATCOM)/lib286/win \
 	  libpath $(WATCOM)/lib286 library windows,shell,ddeml,clibl \
-	  option stack=8k,heapsize=4k,version=3.10 option stub=$(DOSPACKED)
+	  option stack=8k,heapsize=4k,version=3.10 option stub=$(WINSTUB)
 
-$(OUT)/INSTALL.EXE: $(WINIMAGE) upx
+# SETUP.EXE: the Windows frontend
+$(OUT)/SETUP.EXE: $(WINIMAGE) upx
 	cp $< $@
 	$(UPX) --best $@
 	$(UPX) -t $@
