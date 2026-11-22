@@ -17,12 +17,15 @@ int PASCAL WinMain( HINSTANCE instance, HINSTANCE previous, LPSTR command_line, 
         WinExec( program, show );
     if ( seconds < 1 )
         seconds = 30;
-    SetTimer( NULL, 1, (UINT)seconds * 1000, NULL );
+    /* a tick each second: a Win16 timer takes at most 65 seconds */
+    SetTimer( NULL, 1, 1000, NULL );
     while ( GetMessage( &message, NULL, 0, 0 ) ) {
         if ( message.message == WM_TIMER ) {
+            if ( --seconds > 0 )
+                continue;
             /* again after 5 seconds if an application refused */
             ExitWindows( 0, 0 );
-            SetTimer( NULL, 1, 5000, NULL );
+            seconds = 5;
             continue;
         }
         TranslateMessage( &message );
