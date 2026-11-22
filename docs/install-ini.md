@@ -22,7 +22,7 @@ License3=WinFile|WINFILE.LIC
 Readme=README.TXT               ; offered at the end (optional)
 DefaultDir=%BOOT%\AHCIASPI      ; proposed target directory
 Done=AHCIASPI is installed. Restart the computer to load the driver.
-Uninstall=yes                   ; copy INSTALL.EXE/INI to the target (default)
+Uninstall=yes                   ; copy INSTALL.EXE, SETUP.EXE and the INI to the target (default)
 
 [Welcome]
 Any number of lines of welcome text.
@@ -118,7 +118,7 @@ Accept=Akzeptieren
 | `DefaultDir=` | proposed target directory (`%DIR%`) |
 | `SetupDir=` | a subdirectory of `%DIR%` for `INSTALL.EXE`/`INSTALL.INI` and the journals, so that several packages can share `%DIR%` (see [Uninstall and updates](uninstall-update.md)) |
 | `Done=` | text of the last dialog |
-| `Uninstall=` | `yes` (default): copy `INSTALL.EXE`/`INSTALL.INI` to the target for `INSTALL /U` |
+| `Uninstall=` | `yes` (default): copy `INSTALL.EXE`, `SETUP.EXE` (if the package has it) and `INSTALL.INI` to the target for `INSTALL /U` |
 | `Texts=` | the section of `src/language.ini` for the texts (default: the language of the system) |
 | `Windows=` | `no`: refuse to run under Windows (text `[Text] NeedDos`), for packages that replace files Windows has open |
 | `Space=` | KB the installation needs (default: the files next to `INSTALL.EXE`, archives twice) |
