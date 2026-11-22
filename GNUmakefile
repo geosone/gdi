@@ -1,4 +1,4 @@
-# GeosOne Dual Installer (INSTALL.EXE for DOS, SETUP.EXE for Windows) - GNU make, Open Watcom
+# GeosOne Dual Installer (INSTALL.EXE for DOS, SETUP16.EXE for Windows) - GNU make, Open Watcom
 #   make [WATCOM=/opt/watcom]
 WATCOM ?= /opt/watcom
 export WATCOM
@@ -25,7 +25,7 @@ WINIMAGE := $(OUT)/SETUP.UNP
 
 .DELETE_ON_ERROR:
 
-all: $(OUT)/INSTALL.EXE $(OUT)/SETUP.EXE $(OUT)/gdicheck
+all: $(OUT)/INSTALL.EXE $(OUT)/SETUP16.EXE $(OUT)/gdicheck
 
 # INSTALL /CHECK for the host: build/gdicheck INSTALL.INI ...
 $(OUT)/gdicheck: src/check.c src/check.h | $(OUT)
@@ -62,7 +62,7 @@ $(OUT)/INSTALL.EXE: $(DOSIMAGE) upx
 	$(UPX) --best --lzma $@
 	$(UPX) -t $@
 
-# the DOS part of SETUP.EXE runs INSTALL.EXE
+# the DOS part of SETUP16.EXE runs INSTALL.EXE
 $(WINSTUB): src/stub.c | $(OUT)
 	$(CC) -q -bt=dos -ms -0 -os -s -zq -wx -I$(WATCOM)/h -fo=$(OUT)/stub.obj $<
 	$(LINK) option quiet format dos name $@ file $(OUT)/stub.obj \
@@ -101,8 +101,8 @@ $(WINIMAGE): $(WINSTUB) $(WINOBJS)
 	  libpath $(WATCOM)/lib286 library windows,shell,ddeml,clibl \
 	  option stack=8k,heapsize=4k,version=3.10 option stub=$(WINSTUB)
 
-# SETUP.EXE: the Windows frontend
-$(OUT)/SETUP.EXE: $(WINIMAGE) upx
+# SETUP16.EXE: the Windows frontend
+$(OUT)/SETUP16.EXE: $(WINIMAGE) upx
 	cp $< $@
 	$(UPX) --best $@
 	$(UPX) -t $@

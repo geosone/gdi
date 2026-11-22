@@ -11,14 +11,14 @@ once. Building requires Open Watcom 2.0 (`WATCOM=/opt/watcom`), GNU make,
 CMake, Ninja, a host C++ compiler and Python 3 (`tools/mklang.py` makes
 the texts of `src/language.ini` into `build/language.h`):
 
-    make            -> build/INSTALL.EXE (DOS), build/SETUP.EXE (Win16)
+    make            -> build/INSTALL.EXE (DOS), build/SETUP16.EXE (Win16)
     make docs       -> build/gdi-manual.pdf (pandoc and LuaLaTeX)
 
 The build compiles the pinned UPX fork locally and packs the DOS installer
-`INSTALL.STB` (large memory model) as `INSTALL.EXE`. `SETUP.EXE` is the
+`INSTALL.STB` (large memory model) as `INSTALL.EXE`. `SETUP16.EXE` is the
 Win16 frontend `SETUP.UNP`, packed; its DOS stub `SETUP.STB` (`src/stub.c`)
 runs `INSTALL.EXE`. Intermediate files remain in `build/` for diagnosis;
-distribute `INSTALL.EXE` and, for packages Windows may install, `SETUP.EXE`.
+distribute `INSTALL.EXE` and, for packages Windows may install, `SETUP16.EXE`.
 
 ## Tests
 

@@ -1,9 +1,9 @@
 /* wininstall.c - native Windows 3.1/9x frontend for GDI packages.
  *
- * This is SETUP.EXE, the Windows program of the installer; INSTALL.EXE
+ * This is SETUP16.EXE, the Windows program of the installer; INSTALL.EXE
  * next to it is the DOS installer.  The frontend runs a temporary copy
  * of INSTALL.EXE as the transactional engine; started from DOS, the stub
- * of SETUP.EXE (stub.c) runs INSTALL.EXE.
+ * of SETUP16.EXE (stub.c) runs INSTALL.EXE.
  *
  * Copyright (C) 2026 GeosOne. GNU General Public License version 3. */
 
@@ -43,7 +43,7 @@ static int uninstall_mode;   /* 1 /U, 2 /M */
 extern char answer_file[80];   /* core.c: INSTALL /S[:file] */
 extern void (*gdi_removed_hook)( const char *dir );
 static char source_dir[128];
-static char module_dir[128];    /* SETUP.EXE and INSTALL.EXE */
+static char module_dir[128];    /* SETUP16.EXE and INSTALL.EXE */
 static char module_path[128];
 static char engine_path[128];
 static char completion_path[128];
@@ -150,7 +150,7 @@ static void delete_uninstaller( void )
     delete_file( path );
     path_cat( path, source_dir, "INSTALL.EXE" );
     delete_file( path );
-    path_cat( path, source_dir, "SETUP.EXE" );
+    path_cat( path, source_dir, "SETUP16.EXE" );
     delete_file( path );
     {   /* the runners: GDIPxxxx.EXE, GDIPOST.EXE of older versions */
         struct find_t found;
@@ -424,7 +424,7 @@ static void start_dos_setup( HWND window )
     if ( engine_running )
         return;
     if ( !extract_dos_engine() ) {
-        MessageBox( window, "INSTALL.EXE, the DOS installation engine, was not found next to SETUP.EXE.",
+        MessageBox( window, "INSTALL.EXE, the DOS installation engine, was not found next to SETUP16.EXE.",
                     setup_title, MB_OK | MB_ICONEXCLAMATION );
         return;
     }
@@ -787,7 +787,7 @@ int PASCAL WinMain( HINSTANCE instance, HINSTANCE previous,
     } else
         path_cat( package_ini, source_dir, "INSTALL.INI" );
     if ( ini_load( package_ini ) ) {
-        MessageBox( NULL, "INSTALL.INI was not found next to SETUP.EXE.",
+        MessageBox( NULL, "INSTALL.INI was not found next to SETUP16.EXE.",
                     "GDI", MB_OK | MB_ICONEXCLAMATION );
         release_source_path();
         return 2;

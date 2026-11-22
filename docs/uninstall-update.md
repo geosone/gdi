@@ -3,7 +3,7 @@
 ## INSTALL /U
 
 `INSTALL /U` removes an installation. With `[Setup] Uninstall=yes` (the
-default) Setup copies `INSTALL.EXE`, `SETUP.EXE` (if there) and `INSTALL.INI` to the target
+default) Setup copies `INSTALL.EXE`, `SETUP16.EXE` (if there) and `INSTALL.INI` to the target
 directory; `INSTALL /U` is run from there. It undoes everything in reverse
 order:
 

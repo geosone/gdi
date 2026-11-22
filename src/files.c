@@ -459,9 +459,9 @@ void copy_all( void )
 		ui_progress( progtitle, "INSTALL.EXE", ++done, total );
 		copy_file( from, to );
 		/* the Windows program, if the package has one */
-		path_cat( from, srcdir, "SETUP.EXE" );
-		path_cat( to, jdir, "SETUP.EXE" );
-		ui_progress( progtitle, "SETUP.EXE", ++done, total );
+		path_cat( from, srcdir, "SETUP16.EXE" );
+		path_cat( to, jdir, "SETUP16.EXE" );
+		ui_progress( progtitle, "SETUP16.EXE", ++done, total );
 		if ( file_exists( from ) )
 			copy_file( from, to );
 		path_cat( from, srcdir, "INSTALL.INI" );
@@ -758,7 +758,7 @@ static void remove_installed( int rollback )
 		remove( p );
 		path_cat( p, jdir, "INSTALL.EXE" );
 		remove( p );
-		path_cat( p, jdir, "SETUP.EXE" );
+		path_cat( p, jdir, "SETUP16.EXE" );
 		remove( p );
 		gdi_remove_dirs( jdir );
 	}

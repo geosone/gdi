@@ -147,7 +147,7 @@ int main( int argc, char **argv )
 	}
 	if ( language )
 		gdi_text_language( language );
-	/* in Windows the package is installed by SETUP.EXE (which runs this
+	/* in Windows the package is installed by SETUP16.EXE (which runs this
 	 * program with /W or /P): Windows 9x starts it from here, a DOS box
 	 * of Windows 3.x cannot */
 	if ( !*completion_file && windows_running() ) {
@@ -155,7 +155,7 @@ int main( int argc, char **argv )
 		union REGS r;
 		sprintf( setup, "%.80s", argv[0] );
 		s = strrchr( setup, '\\' );
-		strcpy( s ? s + 1 : setup, "SETUP.EXE" );
+		strcpy( s ? s + 1 : setup, "SETUP16.EXE" );
 		if ( file_exists( setup ) ) {
 			r.x.ax = 0x1600;
 			int86( 0x2F, &r, &r );

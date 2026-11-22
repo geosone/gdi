@@ -1,6 +1,6 @@
-/* stub.c - the DOS part of SETUP.EXE (GeosOne Dual Installer)
+/* stub.c - the DOS part of SETUP16.EXE (GeosOne Dual Installer)
  *
- * SETUP.EXE is the Windows program; started from DOS it runs INSTALL.EXE,
+ * SETUP16.EXE is the Windows program; started from DOS it runs INSTALL.EXE,
  * the DOS installer next to it, with the same arguments.
  *
  * Copyright (C) 2026 GeosOne.  GNU General Public License version 3. */

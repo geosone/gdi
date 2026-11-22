@@ -2,16 +2,16 @@
 
 The GeosOne Dual Installer (GDI) installs DOS programs, drivers and
 Windows 3.x software with two programs: `INSTALL.EXE` for DOS and
-`SETUP.EXE` for Windows. `INSTALL.EXE` is a text installer in the style of the
+`SETUP16.EXE` for Windows. `INSTALL.EXE` is a text installer in the style of the
 Qualitas MAX (386MAX) setup: a title bar, cyan dialog windows and a key bar.
 With a DOS mouse driver (INT 33h) the buttons, the rows of option lists
 and the keys of the key bar can be clicked as well.
-`SETUP.EXE` is the native Win16 frontend for Windows 3.1x and 95/98/ME.
+`SETUP16.EXE` is the native Win16 frontend for Windows 3.1x and 95/98/ME.
 Both read the same `INSTALL.INI`. Each starts the other when it is run in
-the wrong system and the other one is there: `SETUP.EXE` started from DOS
+the wrong system and the other one is there: `SETUP16.EXE` started from DOS
 runs `INSTALL.EXE`, `INSTALL.EXE` started in Windows 95/98/ME runs
-`SETUP.EXE` (a DOS box of Windows 3.x cannot start a Windows program: there
-it asks for `SETUP.EXE`). A package for DOS only ships `INSTALL.EXE` alone.
+`SETUP16.EXE` (a DOS box of Windows 3.x cannot start a Windows program: there
+it asks for `SETUP16.EXE`). A package for DOS only ships `INSTALL.EXE` alone.
 
 License: GNU General Public License version 3.
 

@@ -22,7 +22,7 @@ IMG=${WIN311IMG:-$HOME/mars/ahciaspi/build/win311/win311.img}
 rm -rf "$OUT"; mkdir -p "$OUT/src" "$OUT/files"
 cp "$IMG" "$OUT/hd.img"; P="$OUT/hd.img@@32256"
 crlf() { sed 's/$/\r/'; }
-cp "$ROOT/build/INSTALL.EXE" "$ROOT/build/SETUP.EXE" "$OUT/src/"
+cp "$ROOT/build/INSTALL.EXE" "$ROOT/build/SETUP16.EXE" "$OUT/src/"
 cp "$ROOT/test/TESTPM.INI" "$OUT/src/INSTALL.INI"
 # COUNTRY=049: COUNTRY= in CONFIG.SYS (COUNTRYSYS: the COUNTRY.SYS of the DOS
 # in the image) and the texts of the system's language, German: E=Entfernen
@@ -98,7 +98,7 @@ if [ -n "${UPDATE:-}" ]; then
     echo 'setting=default 2.0' | crlf > "$OUT/src/PMTEST.CFG"
     mcopy -o -i "$P" "$OUT"/src/* ::/SRC/
     if [ -n "${FRONTEND:-}" ]; then
-        run '@ECHO OFF|PATH C:\;C:\WINDOWS|C:\WINDOWS\WIN C:\SRC\SETUP.EXE' update "ret ret ret ret ret ret"
+        run '@ECHO OFF|PATH C:\;C:\WINDOWS|C:\WINDOWS\WIN C:\SRC\SETUP16.EXE' update "ret ret ret ret ret ret"
     else
         run 'C:\SRC\INSTALL.EXE' update "ret ret ret ret ret"
     fi
@@ -120,10 +120,10 @@ elif [ -n "${FRONTEND:-}" ]; then
     else
         KEYS_IN="ret ret ret ret ret ret" KEYS_UN="$R ret"
     fi
-    A_IN='' A_UN=${U/INSTALL.EXE/SETUP.EXE}
+    A_IN='' A_UN=${U/INSTALL.EXE/SETUP16.EXE}
     [ -n "${SILENT:-}" ] && A_IN=' /S' KEYS_IN=''
-    [ -n "${MANAGE:-}" ] && A_UN='C:\SRC\SETUP.EXE /M' KEYS_UN="spc ret $R ret"
-    TIMEOUT=${TIMEOUT:-80} run "$W C:\SRC\SETUP.EXE$A_IN" install "$KEYS_IN"
+    [ -n "${MANAGE:-}" ] && A_UN='C:\SRC\SETUP16.EXE /M' KEYS_UN="spc ret $R ret"
+    TIMEOUT=${TIMEOUT:-80} run "$W C:\SRC\SETUP16.EXE$A_IN" install "$KEYS_IN"
     fetch 1-installed
     TIMEOUT=${TIMEOUT:-80} run "$W $A_UN" uninst "$KEYS_UN"
     fetch 2-removed

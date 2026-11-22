@@ -1,8 +1,8 @@
 # Windows
 
-## INSTALL.EXE for DOS, SETUP.EXE for Windows
+## INSTALL.EXE for DOS, SETUP16.EXE for Windows
 
-`INSTALL.EXE` is the text installer for DOS. `SETUP.EXE` is the installer
+`INSTALL.EXE` is the text installer for DOS. `SETUP16.EXE` is the installer
 for Windows 3.1x and Windows 95/98/ME, a native Win16 frontend written
 directly against `USER`, `GDI` and `KERNEL` with the standard Win16 C
 runtime, without MFC or another UI framework. Both read the same
@@ -10,12 +10,12 @@ runtime, without MFC or another UI framework. Both read the same
 
 Each one hands over to the other when that one is next to it:
 
-- `SETUP.EXE` started from DOS runs `INSTALL.EXE` with its arguments;
+- `SETUP16.EXE` started from DOS runs `INSTALL.EXE` with its arguments;
   without `INSTALL.EXE` it says that it requires Windows.
-- `INSTALL.EXE` started in Windows 95/98/ME runs `SETUP.EXE` with its
+- `INSTALL.EXE` started in Windows 95/98/ME runs `SETUP16.EXE` with its
   arguments and ends. A DOS box of Windows 3.x cannot start a Windows
-  program: there `INSTALL.EXE` asks to start `SETUP.EXE` from Windows.
-  Without `SETUP.EXE` it installs as in DOS.
+  program: there `INSTALL.EXE` asks to start `SETUP16.EXE` from Windows.
+  Without `SETUP16.EXE` it installs as in DOS.
 
 Up to version 1.16 both were one MZ/NE file; its DOS part had to stay below
 64 KB packed, which left too little memory for large combined setups.
@@ -65,7 +65,7 @@ When the engine has finished, the frontend applies the registry plan,
 writes the `WIN.INI` values with the profile functions and the Program
 Manager items through DDE, and deletes the temporary engine. For `/U` it
 restores the registry journal first and only then removes the retained
-uninstaller. `INSTALL.EXE` and `SETUP.EXE` are copied for uninstall; the
+uninstaller. `INSTALL.EXE` and `SETUP16.EXE` are copied for uninstall; the
 frame runs a temporary copy of `INSTALL.EXE` as its engine.
 
 ## Packages for DOS only
